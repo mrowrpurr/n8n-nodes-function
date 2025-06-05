@@ -108,23 +108,29 @@ export class Function implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		console.log("🎯 Function: Starting execution")
+
 		// This function is called when the function is invoked by a Call Function node
 		// The input data will contain the parameters passed from the Call Function node
 		const inputData = this.getInputData()
+		console.log("🎯 Function: Input data =", inputData)
 
 		// Get the function parameters configuration
 		const parameters = this.getNodeParameter("parameters", 0, {}) as any
 		const parameterList = parameters.parameter || []
+		console.log("🎯 Function: Parameter list =", parameterList)
 
 		// Process the input data and set up locals
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < inputData.length; itemIndex++) {
+			console.log("🎯 Function: Processing item", itemIndex)
 			const item = inputData[itemIndex]
 			const locals: Record<string, any> = {}
 
 			// Extract parameters from the input item
 			if (item.json && typeof item.json === "object") {
+				console.log("🎯 Function: Item JSON =", item.json)
 				for (const param of parameterList) {
 					const paramName = param.name
 					const paramType = param.type
@@ -132,6 +138,7 @@ export class Function implements INodeType {
 					const defaultValue = param.defaultValue
 
 					let value = (item.json as any)[paramName]
+					console.log("🎯 Function: Processing parameter", paramName, "=", value)
 
 					// Handle required parameters
 					if (required && (value === undefined || value === null)) {
@@ -167,17 +174,23 @@ export class Function implements INodeType {
 				}
 			}
 
+			console.log("🎯 Function: Final locals =", locals)
+
 			// Create the output item with locals set
-			returnData.push({
+			const outputItem = {
 				json: {
 					...item.json,
 					locals,
 				},
 				index: itemIndex,
 				binary: item.binary,
-			})
+			}
+
+			console.log("🎯 Function: Output item =", outputItem)
+			returnData.push(outputItem)
 		}
 
+		console.log("🎯 Function: Returning data =", returnData)
 		return [returnData]
 	}
 }

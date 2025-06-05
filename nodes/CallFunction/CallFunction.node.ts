@@ -100,12 +100,17 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		console.log("🔧 CallFunction: Starting execution")
 		const items = this.getInputData()
+		console.log("🔧 CallFunction: Input items count =", items.length)
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
+
+			console.log("🔧 CallFunction: Function name =", functionName)
+			console.log("🔧 CallFunction: Parameter mode =", parameterMode)
 
 			if (!functionName) {
 				throw new NodeOperationError(this.getNode(), "Function name is required")
@@ -116,6 +121,7 @@ export class CallFunction implements INodeType {
 
 			if (parameterMode === "json") {
 				const parametersJson = this.getNodeParameter("parametersJson", itemIndex) as string
+				console.log("🔧 CallFunction: Raw JSON parameters =", parametersJson)
 				try {
 					functionParameters = JSON.parse(parametersJson)
 				} catch (error) {
@@ -125,6 +131,7 @@ export class CallFunction implements INodeType {
 				// Individual parameters mode
 				const parameters = this.getNodeParameter("parameters", itemIndex, {}) as any
 				const parameterList = parameters.parameter || []
+				console.log("🔧 CallFunction: Parameter list =", parameterList)
 
 				for (const param of parameterList) {
 					const paramName = param.name
@@ -141,6 +148,11 @@ export class CallFunction implements INodeType {
 					functionParameters[paramName] = parsedValue
 				}
 			}
+
+			console.log("🔧 CallFunction: Final parameters =", functionParameters)
+
+			console.log("🔧 CallFunction: TODO - Need to implement actual function triggering")
+			console.log("🔧 CallFunction: Would trigger function:", functionName, "with params:", functionParameters)
 
 			// TODO: Implement the actual function calling mechanism
 			// This is where we need to:
@@ -174,9 +186,11 @@ export class CallFunction implements INodeType {
 				binary: item.binary,
 			}
 
+			console.log("🔧 CallFunction: Created result item =", resultItem)
 			returnData.push(resultItem)
 		}
 
+		console.log("🔧 CallFunction: Returning data =", returnData)
 		return [returnData]
 	}
 }
