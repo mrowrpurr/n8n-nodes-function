@@ -157,15 +157,24 @@ export class CallFunction implements INodeType {
 
 			// Get the execution ID to find the correct function instance
 			const executionId = this.getExecutionId()
-			console.log("🔧 CallFunction: Execution ID =", executionId)
+			// Use same fallback as Function node for active workflows
+			const effectiveExecutionId = executionId ?? "__active__"
+			console.log("🔧 CallFunction: Execution ID =", effectiveExecutionId)
+			console.log("🔧 CallFunction: Raw execution ID =", executionId)
 
 			// Use the FunctionRegistry to call the function
 			const registry = FunctionRegistry.getInstance()
 			const item = items[itemIndex]
 
 			try {
-				// Call the function through the registry
-				const functionResult = await registry.callFunction(functionName, executionId, functionParameters, item)
+				// Try to call the function with current execution ID first, then fallback to "__active__"
+				let functionResult = await registry.callFunction(functionName, effectiveExecutionId, functionParameters, item)
+
+				// If not found with current execution ID, try with "__active__" fallback
+				if (functionResult === null && effectiveExecutionId !== "__active__") {
+					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
+					functionResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
+				}
 
 				if (functionResult === null) {
 					throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or not registered in this execution`)

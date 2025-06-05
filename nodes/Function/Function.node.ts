@@ -1,4 +1,12 @@
-import { type INodeExecutionData, NodeConnectionType, type INodeType, type INodeTypeDescription, NodeOperationError, type IExecuteFunctions } from "n8n-workflow"
+import {
+	type INodeExecutionData,
+	NodeConnectionType,
+	type INodeType,
+	type INodeTypeDescription,
+	NodeOperationError,
+	type ITriggerFunctions,
+	type ITriggerResponse,
+} from "n8n-workflow"
 import { FunctionRegistry } from "../FunctionRegistry"
 
 export class Function implements INodeType {
@@ -6,14 +14,15 @@ export class Function implements INodeType {
 		displayName: "Function",
 		name: "function",
 		icon: "fa:code",
-		group: ["transform"],
+		group: ["trigger"],
 		version: 1,
 		description: "Define a callable function within the current workflow",
+		eventTriggerDescription: "Called by a Call Function node",
 		defaults: {
 			name: "Function",
 			color: "#4a90e2",
 		},
-		inputs: [NodeConnectionType.Main],
+		inputs: [],
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
@@ -107,24 +116,23 @@ export class Function implements INodeType {
 		],
 	}
 
-	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🎯 Function: Starting execution")
+	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
+		console.log("🎯 Function: Starting trigger setup")
 
-		// Get input items
-		const items = this.getInputData()
-		console.log("🎯 Function: Input items count =", items.length)
-
-		// Get function configuration (using first item for configuration)
-		const functionName = this.getNodeParameter("functionName", 0) as string
-		const parameters = this.getNodeParameter("parameters", 0, {}) as any
+		// Get function configuration
+		const functionName = this.getNodeParameter("functionName") as string
+		const parameters = this.getNodeParameter("parameters", {}) as any
 		const parameterList = parameters.parameter || []
 
 		// Get execution and node IDs for context tracking
 		const executionId = this.getExecutionId()
 		const nodeId = this.getNode().id
 
-		console.log("🎯 Function: Registering function:", functionName)
-		console.log("🎯 Function: Execution:", executionId)
+		// Use fallback execution ID when workflow is active (executionId is undefined)
+		const effectiveExecutionId = executionId ?? "__active__"
+
+		console.log("🎯 Function: Registering function:", functionName, "with execution:", effectiveExecutionId)
+		console.log("🎯 Function: Raw execution ID:", executionId)
 		console.log("🎯 Function: Parameter list:", parameterList)
 
 		const registry = FunctionRegistry.getInstance()
@@ -191,17 +199,26 @@ export class Function implements INodeType {
 				binary: inputItem.binary,
 			}
 
-			console.log("🎯 Function: Function executed, returning output item =", outputItem)
+			console.log("🎯 Function: Emitting output item =", outputItem)
+
+			// Emit the data to trigger downstream nodes
+			this.emit([this.helpers.returnJsonArray([outputItem])])
 
 			// Return the result for the CallFunction node
 			return [outputItem]
 		}
 
 		// Register the function with the registry
-		registry.registerFunction(functionName, executionId, nodeId, functionCallback)
-		console.log("🎯 Function: Function registered successfully")
+		registry.registerFunction(functionName, effectiveExecutionId, nodeId, functionCallback)
 
-		// Return the input items to pass through to next nodes
-		return [items]
+		// Define cleanup function
+		const closeFunction = async () => {
+			console.log("🎯 Function: Cleaning up function:", functionName)
+			registry.unregisterFunction(functionName, effectiveExecutionId)
+		}
+
+		return {
+			closeFunction,
+		}
 	}
 }
