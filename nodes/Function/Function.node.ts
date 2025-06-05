@@ -1,19 +1,19 @@
-import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
+import { type INodeExecutionData, NodeConnectionType, type INodeType, type INodeTypeDescription, NodeOperationError, type IExecuteFunctions } from "n8n-workflow"
+import { FunctionRegistry } from "../FunctionRegistry"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: "Function",
 		name: "function",
 		icon: "fa:code",
-		group: ["trigger"],
+		group: ["transform"],
 		version: 1,
 		description: "Define a callable function within the current workflow",
-		eventTriggerDescription: "Called by a Call Function node",
 		defaults: {
 			name: "Function",
 			color: "#4a90e2",
 		},
-		inputs: [],
+		inputs: [NodeConnectionType.Main],
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
@@ -110,87 +110,98 @@ export class Function implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		console.log("🎯 Function: Starting execution")
 
-		// This function is called when the function is invoked by a Call Function node
-		// The input data will contain the parameters passed from the Call Function node
-		const inputData = this.getInputData()
-		console.log("🎯 Function: Input data =", inputData)
+		// Get input items
+		const items = this.getInputData()
+		console.log("🎯 Function: Input items count =", items.length)
 
-		// Get the function parameters configuration
+		// Get function configuration (using first item for configuration)
+		const functionName = this.getNodeParameter("functionName", 0) as string
 		const parameters = this.getNodeParameter("parameters", 0, {}) as any
 		const parameterList = parameters.parameter || []
-		console.log("🎯 Function: Parameter list =", parameterList)
 
-		// Process the input data and set up locals
-		const returnData: INodeExecutionData[] = []
+		// Get execution and node IDs for context tracking
+		const executionId = this.getExecutionId()
+		const nodeId = this.getNode().id
 
-		for (let itemIndex = 0; itemIndex < inputData.length; itemIndex++) {
-			console.log("🎯 Function: Processing item", itemIndex)
-			const item = inputData[itemIndex]
+		console.log("🎯 Function: Registering function:", functionName)
+		console.log("🎯 Function: Execution:", executionId)
+		console.log("🎯 Function: Parameter list:", parameterList)
+
+		const registry = FunctionRegistry.getInstance()
+
+		// Create the function callback that will be invoked by CallFunction
+		const functionCallback = async (functionParameters: Record<string, any>, inputItem: INodeExecutionData): Promise<INodeExecutionData[]> => {
+			console.log("🎯 Function: Callback invoked with parameters:", functionParameters)
+			console.log("🎯 Function: Input item:", inputItem)
+
+			// Process parameters according to function definition
 			const locals: Record<string, any> = {}
 
-			// Extract parameters from the input item
-			if (item.json && typeof item.json === "object") {
-				console.log("🎯 Function: Item JSON =", item.json)
-				for (const param of parameterList) {
-					const paramName = param.name
-					const paramType = param.type
-					const required = param.required
-					const defaultValue = param.defaultValue
+			for (const param of parameterList) {
+				const paramName = param.name
+				const paramType = param.type
+				const required = param.required
+				const defaultValue = param.defaultValue
 
-					let value = (item.json as any)[paramName]
-					console.log("🎯 Function: Processing parameter", paramName, "=", value)
+				let value = functionParameters[paramName]
+				console.log("🎯 Function: Processing parameter", paramName, "=", value)
 
-					// Handle required parameters
-					if (required && (value === undefined || value === null)) {
-						throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-					}
+				// Handle required parameters
+				if (required && (value === undefined || value === null)) {
+					throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+				}
 
-					// Use default value if not provided
-					if (value === undefined || value === null) {
-						if (defaultValue !== "") {
-							try {
-								// Try to parse default value based on type
-								switch (paramType) {
-									case "number":
-										value = Number(defaultValue)
-										break
-									case "boolean":
-										value = defaultValue.toLowerCase() === "true"
-										break
-									case "object":
-									case "array":
-										value = JSON.parse(defaultValue)
-										break
-									default:
-										value = defaultValue
-								}
-							} catch (error) {
-								value = defaultValue // Fall back to string if parsing fails
+				// Use default value if not provided
+				if (value === undefined || value === null) {
+					if (defaultValue !== "") {
+						try {
+							// Try to parse default value based on type
+							switch (paramType) {
+								case "number":
+									value = Number(defaultValue)
+									break
+								case "boolean":
+									value = defaultValue.toLowerCase() === "true"
+									break
+								case "object":
+								case "array":
+									value = JSON.parse(defaultValue)
+									break
+								default:
+									value = defaultValue
 							}
+						} catch (error) {
+							value = defaultValue // Fall back to string if parsing fails
 						}
 					}
-
-					locals[paramName] = value
 				}
+
+				locals[paramName] = value
 			}
 
 			console.log("🎯 Function: Final locals =", locals)
 
 			// Create the output item with locals set
-			const outputItem = {
+			const outputItem: INodeExecutionData = {
 				json: {
-					...item.json,
+					...inputItem.json,
 					locals,
 				},
-				index: itemIndex,
-				binary: item.binary,
+				index: 0,
+				binary: inputItem.binary,
 			}
 
-			console.log("🎯 Function: Output item =", outputItem)
-			returnData.push(outputItem)
+			console.log("🎯 Function: Function executed, returning output item =", outputItem)
+
+			// Return the result for the CallFunction node
+			return [outputItem]
 		}
 
-		console.log("🎯 Function: Returning data =", returnData)
-		return [returnData]
+		// Register the function with the registry
+		registry.registerFunction(functionName, executionId, nodeId, functionCallback)
+		console.log("🎯 Function: Function registered successfully")
+
+		// Return the input items to pass through to next nodes
+		return [items]
 	}
 }

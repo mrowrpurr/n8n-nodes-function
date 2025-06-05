@@ -1,4 +1,5 @@
 import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
+import { FunctionRegistry } from "../FunctionRegistry"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -151,43 +152,71 @@ export class CallFunction implements INodeType {
 
 			console.log("🔧 CallFunction: Final parameters =", functionParameters)
 
-			console.log("🔧 CallFunction: TODO - Need to implement actual function triggering")
-			console.log("🔧 CallFunction: Would trigger function:", functionName, "with params:", functionParameters)
+			console.log("🔧 CallFunction: Implementing actual function triggering")
+			console.log("🔧 CallFunction: Calling function:", functionName, "with params:", functionParameters)
 
-			// TODO: Implement the actual function calling mechanism
-			// This is where we need to:
-			// 1. Find the Function node with the matching name in the current workflow
-			// 2. Trigger that Function node with our parameters
-			// 3. Wait for the execution to complete
-			// 4. Get the result back
+			// Get the execution ID to find the correct function instance
+			const executionId = this.getExecutionId()
+			console.log("🔧 CallFunction: Execution ID =", executionId)
 
-			// For now, we'll create a placeholder result that shows what we're trying to do
+			// Use the FunctionRegistry to call the function
+			const registry = FunctionRegistry.getInstance()
 			const item = items[itemIndex]
 
-			// This is a simplified implementation - in reality, we need to:
-			// - Trigger the Function node
-			// - Set up $json.locals with our parameters
-			// - Execute the downstream nodes from the Function
-			// - Collect the results
-			// - Clean up $json.locals
+			try {
+				// Call the function through the registry
+				const functionResult = await registry.callFunction(functionName, executionId, functionParameters, item)
 
-			const resultItem: INodeExecutionData = {
-				json: {
-					...item.json,
-					// This would be replaced with actual function execution results
-					_functionCall: {
-						functionName,
-						parameters: functionParameters,
-						// TODO: Replace with actual function execution result
-						result: "Function execution not yet implemented",
+				if (functionResult === null) {
+					throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or not registered in this execution`)
+				}
+
+				console.log("🔧 CallFunction: Function returned result =", functionResult)
+
+				// Use the result from the function call
+				// The function result should contain the processed data with locals
+				const resultItem: INodeExecutionData = {
+					json: {
+						...item.json,
+						// Include the function result data
+						...functionResult[0]?.json,
+						// Add metadata about the function call
+						_functionCall: {
+							functionName,
+							parameters: functionParameters,
+							success: true,
+						},
 					},
-				},
-				index: itemIndex,
-				binary: item.binary,
-			}
+					index: itemIndex,
+					binary: functionResult[0]?.binary || item.binary,
+				}
 
-			console.log("🔧 CallFunction: Created result item =", resultItem)
-			returnData.push(resultItem)
+				console.log("🔧 CallFunction: Created result item =", resultItem)
+				returnData.push(resultItem)
+			} catch (error) {
+				console.error("🔧 CallFunction: Error calling function:", error)
+
+				// Create an error result item
+				const errorItem: INodeExecutionData = {
+					json: {
+						...item.json,
+						_functionCall: {
+							functionName,
+							parameters: functionParameters,
+							success: false,
+							error: error.message,
+						},
+					},
+					index: itemIndex,
+					binary: item.binary,
+				}
+
+				if (this.continueOnFail()) {
+					returnData.push(errorItem)
+				} else {
+					throw error
+				}
+			}
 		}
 
 		console.log("🔧 CallFunction: Returning data =", returnData)
