@@ -1,19 +1,19 @@
 {
-	"name": "n8n-nodes-global-variables",
-	"version": "0.1.4",
-	"description": "Global Variables node for n8n",
+	"name": "n8n-nodes-function",
+	"version": "1.0.0",
+	"description": "Function and Call Function nodes for n8n - Blueprint-style local functions",
 	"keywords": [
 		"n8n-community-node-package"
 	],
 	"license": "MIT",
-	"homepage": "https://github.com/mrowrpurr/n8n-nodes-global-variables",
+	"homepage": "https://github.com/mrowrpurr/n8n-nodes-function",
 	"author": {
 		"name": "Mrowr Purr",
 		"email": "mrowr.purr@gmail.com"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/mrowrpurr/n8n-nodes-global-variables.git"
+		"url": "https://github.com/mrowrpurr/n8n-nodes-function.git"
 	},
 	"engines": {
 		"node": ">=20.15"
@@ -22,21 +22,20 @@
 	"scripts": {
 		"build": "pnpx rimraf dist && tsc && gulp build:icons",
 		"dev": "tsc --watch",
-		"format": "prettier nodes credentials --write",
-		"lint": "eslint nodes credentials package.json",
-		"lintfix": "eslint nodes credentials package.json --fix",
-		"prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes credentials package.json"
+		"format": "prettier nodes --write",
+		"lint": "eslint nodes package.json",
+		"lintfix": "eslint nodes package.json --fix",
+		"prepublishOnly": "npm run build && npm run lint -c .eslintrc.prepublish.js nodes package.json"
 	},
 	"files": [
 		"dist"
 	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
-		"credentials": [
-			"dist/credentials/GlobalVariablesCredentials.credentials.js"
-		],
+		"credentials": [],
 		"nodes": [
-			"dist/nodes/GlobalVariables/GlobalVariables.node.js"
+			"dist/nodes/Function/Function.node.js",
+			"dist/nodes/CallFunction/CallFunction.node.js"
 		]
 	},
 	"devDependencies": {
