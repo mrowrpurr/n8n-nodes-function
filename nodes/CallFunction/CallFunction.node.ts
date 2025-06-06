@@ -38,6 +38,7 @@ export class CallFunction implements INodeType {
 				type: "options",
 				typeOptions: {
 					loadOptionsMethod: "getAvailableFunctions",
+					dependsOn: ["globalFunction"],
 				},
 				default: "",
 				required: true,
