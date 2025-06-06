@@ -7,7 +7,7 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { FunctionRegistry } from "../FunctionRegistry"
+import { FunctionRegistry, type ParameterDefinition } from "../FunctionRegistry"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
@@ -208,8 +208,17 @@ export class Function implements INodeType {
 			return [outputItem]
 		}
 
+		// Convert parameter list to ParameterDefinition format
+		const parameterDefinitions: ParameterDefinition[] = parameterList.map((param: any) => ({
+			name: param.name,
+			type: param.type,
+			required: param.required,
+			defaultValue: param.defaultValue,
+			description: param.description,
+		}))
+
 		// Register the function with the registry
-		registry.registerFunction(functionName, effectiveExecutionId, nodeId, functionCallback)
+		registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)
 
 		// Define cleanup function
 		const closeFunction = async () => {

@@ -17,6 +17,7 @@ export class CallFunction implements INodeType {
 		group: ["transform"],
 		version: 1,
 		description: "Call a Function node defined in the current workflow",
+		subtitle: '={{$parameter["functionName"] ? $parameter["functionName"] : ""}}',
 		defaults: {
 			name: "Call Function",
 			color: "#ff6d5a",
@@ -90,12 +91,14 @@ export class CallFunction implements INodeType {
 						displayName: "Parameter",
 						values: [
 							{
-								displayName: "Name",
+								displayName: "Parameter Name or ID",
 								name: "name",
-								type: "string",
+								type: "options",
+								typeOptions: {
+									loadOptionsMethod: "getFunctionParameters",
+								},
 								default: "",
-								placeholder: "parameterName",
-								description: "Name of the parameter",
+								description: 'Select the parameter to set. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 								required: true,
 							},
 							{
@@ -120,6 +123,24 @@ export class CallFunction implements INodeType {
 				const availableFunctions = registry.getAvailableFunctions()
 				console.log("🔧 CallFunction: Available functions:", availableFunctions)
 				return availableFunctions
+			},
+			async getFunctionParameters(this: ILoadOptionsFunctions) {
+				const functionName = this.getCurrentNodeParameter("functionName") as string
+				console.log("🔧 CallFunction: Loading parameters for function:", functionName)
+
+				if (!functionName) {
+					return []
+				}
+
+				const registry = FunctionRegistry.getInstance()
+				const parameters = registry.getFunctionParameters(functionName)
+				console.log("🔧 CallFunction: Found parameters:", parameters)
+
+				return parameters.map((param) => ({
+					name: `${param.name} (${param.type})${param.required ? " *" : ""}`,
+					value: param.name,
+					description: param.description || `${param.type} parameter${param.required ? " (required)" : ""}`,
+				}))
 			},
 		},
 	}

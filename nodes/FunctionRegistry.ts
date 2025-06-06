@@ -1,9 +1,18 @@
 import { INodeExecutionData } from "n8n-workflow"
 
+interface ParameterDefinition {
+	name: string
+	type: string
+	required: boolean
+	defaultValue: string
+	description: string
+}
+
 interface FunctionListener {
 	functionName: string
 	executionId: string
 	nodeId: string
+	parameters: ParameterDefinition[]
 	callback: (parameters: Record<string, any>, inputItem: INodeExecutionData) => Promise<INodeExecutionData[]>
 }
 
@@ -22,15 +31,18 @@ class FunctionRegistry {
 		functionName: string,
 		executionId: string,
 		nodeId: string,
+		parameters: ParameterDefinition[],
 		callback: (parameters: Record<string, any>, inputItem: INodeExecutionData) => Promise<INodeExecutionData[]>
 	): void {
 		const key = `${functionName}-${executionId}`
 		console.log("🎯 FunctionRegistry: Registering function:", key)
+		console.log("🎯 FunctionRegistry: Parameters:", parameters)
 
 		this.listeners.set(key, {
 			functionName,
 			executionId,
 			nodeId,
+			parameters,
 			callback,
 		})
 	}
@@ -84,6 +96,24 @@ class FunctionRegistry {
 			value: name,
 		}))
 	}
+
+	getFunctionParameters(functionName: string): ParameterDefinition[] {
+		// Look for the function with __active__ execution ID first
+		const activeKey = `${functionName}-__active__`
+		const activeListener = this.listeners.get(activeKey)
+		if (activeListener) {
+			return activeListener.parameters
+		}
+
+		// If not found, look for any instance of this function
+		for (const listener of this.listeners.values()) {
+			if (listener.functionName === functionName) {
+				return listener.parameters
+			}
+		}
+
+		return []
+	}
 }
 
-export { FunctionRegistry }
+export { FunctionRegistry, type ParameterDefinition }
