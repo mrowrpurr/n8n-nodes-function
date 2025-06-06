@@ -39,6 +39,13 @@ export class CallFunction implements INodeType {
 				placeholder: "Select a function...",
 			},
 			{
+				displayName: "Last Configured Function",
+				name: "lastConfiguredFunction",
+				type: "hidden",
+				default: "",
+				description: "Internal field to track function changes",
+			},
+			{
 				displayName: "Parameter Mode",
 				name: "parameterMode",
 				type: "options",
@@ -134,7 +141,10 @@ export class CallFunction implements INodeType {
 			},
 			async getFunctionParameters(this: ILoadOptionsFunctions) {
 				const functionName = this.getCurrentNodeParameter("functionName") as string
+				const lastConfiguredFunction = this.getCurrentNodeParameter("lastConfiguredFunction") as string
+
 				console.log("🔧 CallFunction: Loading parameters for function:", functionName)
+				console.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
 
 				if (!functionName) {
 					return []
@@ -144,7 +154,7 @@ export class CallFunction implements INodeType {
 				const parameters = registry.getFunctionParameters(functionName)
 				console.log("🔧 CallFunction: Found parameters:", parameters)
 
-				// Get currently selected parameters to filter them out
+				// Get currently selected parameters
 				const currentParameters = this.getCurrentNodeParameter("parameters") as any
 				const selectedParameterNames = new Set<string>()
 
@@ -158,7 +168,41 @@ export class CallFunction implements INodeType {
 
 				console.log("🔧 CallFunction: Already selected parameters:", Array.from(selectedParameterNames))
 
-				// Filter out already-selected parameters
+				// Check if the function has changed from what was last configured
+				const functionChanged = lastConfiguredFunction && lastConfiguredFunction !== functionName
+
+				// Check if any of the currently selected parameters are NOT valid for this function
+				const validParameterNames = new Set(parameters.map((p) => p.name))
+				const hasInvalidParameters = Array.from(selectedParameterNames).some((name) => !validParameterNames.has(name))
+
+				if (functionChanged || hasInvalidParameters) {
+					console.log("🔧 CallFunction: Detected function change - showing reset warning")
+
+					// If there are existing parameters that need to be cleared
+					if (selectedParameterNames.size > 0) {
+						return [
+							{
+								name: "⚠️ Function Changed - Clear Existing Parameters",
+								value: "__function_changed__",
+								description: "Function changed. Please remove all existing parameters before adding new ones.",
+							},
+							{
+								name: "🔄 Clear All Parameters (Select This)",
+								value: "__clear_parameters__",
+								description: "Select this to indicate you want to start fresh with parameters for the new function",
+							},
+						]
+					}
+
+					// No existing parameters, show all available ones
+					return parameters.map((param) => ({
+						name: `${param.name} (${param.type})${param.required ? " *" : ""}`,
+						value: param.name,
+						description: param.description || `${param.type} parameter${param.required ? " (required)" : ""}`,
+					}))
+				}
+
+				// Filter out already-selected parameters (normal case)
 				const availableParameters = parameters.filter((param) => !selectedParameterNames.has(param.name))
 				console.log("🔧 CallFunction: Available parameters after filtering:", availableParameters)
 
@@ -199,6 +243,11 @@ export class CallFunction implements INodeType {
 				throw new NodeOperationError(this.getNode(), "Function name is required")
 			}
 
+			// Get function parameter definitions for validation
+			const registry = FunctionRegistry.getInstance()
+			const functionParameterDefs = registry.getFunctionParameters(functionName)
+			const validParameterNames = new Set(functionParameterDefs.map((p) => p.name))
+
 			// Prepare parameters to pass to the function
 			let functionParameters: Record<string, any> = {}
 
@@ -216,9 +265,24 @@ export class CallFunction implements INodeType {
 				const parameterList = parameters.parameter || []
 				console.log("🔧 CallFunction: Parameter list =", parameterList)
 
+				// Validate parameters and filter out invalid ones
+				const validParameters = []
+				const invalidParameters = []
+
 				for (const param of parameterList) {
 					const paramName = param.name
 					const paramValue = param.value
+
+					// Skip special placeholder values
+					if (paramName === "__no_params_available__" || paramName === "__function_changed__" || paramName === "__clear_parameters__") {
+						continue
+					}
+
+					// Check if parameter is valid for this function
+					if (!validParameterNames.has(paramName)) {
+						invalidParameters.push(paramName)
+						continue
+					}
 
 					// Try to parse the value as JSON first, fall back to string
 					let parsedValue: any
@@ -229,7 +293,16 @@ export class CallFunction implements INodeType {
 					}
 
 					functionParameters[paramName] = parsedValue
+					validParameters.push(paramName)
 				}
+
+				// Warn about invalid parameters
+				if (invalidParameters.length > 0) {
+					console.warn("🔧 CallFunction: Invalid parameters detected (function may have changed):", invalidParameters)
+					console.log("🔧 CallFunction: Valid parameters for function:", Array.from(validParameterNames))
+				}
+
+				console.log("🔧 CallFunction: Valid parameters used:", validParameters)
 			}
 
 			console.log("🔧 CallFunction: Final parameters =", functionParameters)
@@ -244,8 +317,7 @@ export class CallFunction implements INodeType {
 			console.log("🔧 CallFunction: Execution ID =", effectiveExecutionId)
 			console.log("🔧 CallFunction: Raw execution ID =", executionId)
 
-			// Use the FunctionRegistry to call the function
-			const registry = FunctionRegistry.getInstance()
+			// Use the registry instance to call the function
 			const item = items[itemIndex]
 
 			try {
