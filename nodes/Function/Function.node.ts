@@ -222,11 +222,10 @@ export class Function implements INodeType {
 
 			console.log("🎯 Function: Final locals =", locals)
 
-			// Create the initial output item with locals set
+			// Create the initial output item (clean, no parameter pollution)
 			let outputItem: INodeExecutionData = {
 				json: {
 					...inputItem.json,
-					locals,
 				},
 				index: 0,
 				binary: inputItem.binary,
