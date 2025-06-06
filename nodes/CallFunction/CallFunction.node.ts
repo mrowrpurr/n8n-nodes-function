@@ -154,6 +154,17 @@ export class CallFunction implements INodeType {
 				const availableParameters = parameters.filter((param) => !selectedParameterNames.has(param.name))
 				console.log("🔧 CallFunction: Available parameters after filtering:", availableParameters)
 
+				// If no parameters are available, return a descriptive message
+				if (availableParameters.length === 0) {
+					return [
+						{
+							name: "All Parameters Have Been Set",
+							value: "__no_params_available__",
+							description: "All function parameters are already configured",
+						},
+					]
+				}
+
 				return availableParameters.map((param) => ({
 					name: `${param.name} (${param.type})${param.required ? " *" : ""}`,
 					value: param.name,

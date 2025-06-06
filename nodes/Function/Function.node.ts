@@ -18,6 +18,7 @@ export class Function implements INodeType {
 		version: 1,
 		description: "Define a callable function within the current workflow",
 		eventTriggerDescription: "Called by a Call Function node",
+		subtitle: '={{$parameter["functionName"] ? $parameter["functionName"] : ""}}',
 		defaults: {
 			name: "Function",
 			color: "#4a90e2",
