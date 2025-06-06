@@ -2,11 +2,6 @@
 
 Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal Engine 5. Define reusable logic blocks with [`Function`](./nodes/Function), call them with [`CallFunction`](./nodes/CallFunction), and return values with [`ReturnFromFunction`](./nodes/ReturnFromFunction).
 
-[![n8n](https://img.shields.io/badge/n8n-compatible-ff6d5a)](https://n8n.io)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)](https://www.typescriptlang.org/)
-
----
-
 ## 📦 Features
 
 - 🧱 **Define reusable logic** with named [`Function`](./nodes/Function/Function.node.ts) nodes

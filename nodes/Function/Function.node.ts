@@ -18,7 +18,7 @@ export class Function implements INodeType {
 		version: 1,
 		description: "Define a callable function within the current workflow",
 		eventTriggerDescription: "Called by a Call Function node",
-		subtitle: '={{$parameter["functionName"] ? $parameter["functionName"] : ""}}',
+		subtitle: "={{$node.name}}",
 		defaults: {
 			name: "Function",
 			color: "#4a90e2",
@@ -32,14 +32,6 @@ export class Function implements INodeType {
 				type: "boolean",
 				default: false,
 				description: "Whether this function will be registered globally and callable from any workflow",
-			},
-			{
-				displayName: "Function Name",
-				name: "functionName",
-				type: "string",
-				default: "myFunction",
-				required: true,
-				description: "Unique name for this function. If global, must be unique across all workflows.",
 			},
 			{
 				displayName: "Function Parameters",
@@ -154,7 +146,7 @@ export class Function implements INodeType {
 
 		// Get function configuration
 		const globalFunction = this.getNodeParameter("globalFunction") as boolean
-		const functionName = this.getNodeParameter("functionName") as string
+		const functionName = this.getNode().name
 		const parameters = this.getNodeParameter("parameters", {}) as any
 		const parameterList = parameters.parameter || []
 		const enableCode = this.getNodeParameter("enableCode") as boolean
