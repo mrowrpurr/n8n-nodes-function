@@ -119,28 +119,7 @@ export class Function implements INodeType {
 				name: "enableCode",
 				type: "boolean",
 				default: false,
-				description: "Whether to enable optional JavaScript or Python code execution with parameters available as global variables",
-			},
-			{
-				displayName: "Language",
-				name: "language",
-				type: "options",
-				options: [
-					{
-						name: "JavaScript",
-						value: "javaScript",
-					},
-					{
-						name: "Python (Beta)",
-						value: "python",
-					},
-				],
-				default: "javaScript",
-				displayOptions: {
-					show: {
-						enableCode: [true],
-					},
-				},
+				description: "Whether to enable optional JavaScript code execution with parameters available as global variables",
 			},
 			{
 				displayName: "Code",
@@ -156,25 +135,6 @@ export class Function implements INodeType {
 				displayOptions: {
 					show: {
 						enableCode: [true],
-						language: ["javaScript"],
-					},
-				},
-			},
-			{
-				displayName: "Code",
-				name: "pythonCode",
-				type: "string",
-				typeOptions: {
-					editor: "jsEditor",
-					rows: 15,
-				},
-				default:
-					"# Parameters are available as global variables\n# Example: if you have a 'name' parameter, use it directly\n# print('Hello', name)\n\n# Return data by modifying the item\nreturn {**item, 'processed': True}",
-				description: "Python code to execute. Parameters are available as global variables. Return a dict to modify the output.",
-				displayOptions: {
-					show: {
-						enableCode: [true],
-						language: ["python"],
 					},
 				},
 			},
@@ -189,8 +149,7 @@ export class Function implements INodeType {
 		const parameters = this.getNodeParameter("parameters", {}) as any
 		const parameterList = parameters.parameter || []
 		const enableCode = this.getNodeParameter("enableCode") as boolean
-		const language = enableCode ? (this.getNodeParameter("language") as string) : "javaScript"
-		const code = enableCode ? (this.getNodeParameter(language === "python" ? "pythonCode" : "jsCode") as string) : ""
+		const code = enableCode ? (this.getNodeParameter("jsCode") as string) : ""
 
 		// Get execution and node IDs for context tracking
 		const executionId = this.getExecutionId()
@@ -269,64 +228,49 @@ export class Function implements INodeType {
 
 			// Execute user code if enabled
 			if (enableCode && code.trim()) {
-				console.log("🎯 Function: Executing user code:", language)
+				console.log("🎯 Function: Executing JavaScript code")
 
 				try {
-					if (language === "javaScript") {
-						// Execute JavaScript code with parameters as global variables
-						const context = {
-							...locals,
-							item: outputItem.json,
-							console: {
-								log: (...args: any[]) => console.log("🎯 Function Code:", ...args),
-								error: (...args: any[]) => console.error("🎯 Function Code:", ...args),
-								warn: (...args: any[]) => console.warn("🎯 Function Code:", ...args),
-							},
-						}
+					// Execute JavaScript code with parameters as global variables using vm2
+					const context = {
+						...locals,
+						item: outputItem.json,
+						console: {
+							log: (...args: any[]) => console.log("🎯 Function Code:", ...args),
+							error: (...args: any[]) => console.error("🎯 Function Code:", ...args),
+							warn: (...args: any[]) => console.warn("🎯 Function Code:", ...args),
+						},
+					}
 
-						// Create execution context with parameters as variables
-						const paramNames = Object.keys(context)
-						const paramValues = Object.values(context)
-
-						// Build function code with parameter declarations
-						const functionCode = `
-							// Declare parameters as local variables
-							${paramNames.map((name, index) => `var ${name} = arguments[${index}];`).join("\n")}
+					// Execute JavaScript code directly (n8n already provides sandboxing)
+					const wrappedCode = `
+						(function() {
+							// Set up context variables
+							${Object.keys(context)
+								.map((key) => `var ${key} = arguments[0]["${key}"];`)
+								.join("\n\t\t\t\t\t\t")}
 							
-							// Execute user code and return result
-							try {
-								${code}
-							} catch (e) {
-								throw e;
+							// Execute user code
+							${code}
+						})
+					`
+
+					const result = eval(wrappedCode)(context)
+
+					console.log("🎯 Function: Code execution result =", result)
+
+					// If code returns a value, use it as the new output
+					if (result !== undefined) {
+						if (typeof result === "object" && result !== null) {
+							outputItem.json = {
+								...outputItem.json,
+								...result,
 							}
-						`
-
-						// Create function using eval (simpler approach)
-						const userFunction = eval(`(function(${paramNames.join(", ")}) { ${functionCode} })`)
-						const result = userFunction.apply(null, paramValues)
-
-						console.log("🎯 Function: Code execution result =", result)
-
-						// If code returns a value, use it as the new output
-						if (result !== undefined) {
-							if (typeof result === "object" && result !== null) {
-								outputItem.json = {
-									...outputItem.json,
-									...result,
-								}
-							} else {
-								outputItem.json = {
-									...outputItem.json,
-									result,
-								}
+						} else {
+							outputItem.json = {
+								...outputItem.json,
+								result,
 							}
-						}
-					} else if (language === "python") {
-						// For now, just log that Python is not yet implemented
-						console.warn("🎯 Function: Python execution not yet implemented")
-						outputItem.json = {
-							...outputItem.json,
-							_codeError: "Python execution not yet implemented",
 						}
 					}
 				} catch (error) {
