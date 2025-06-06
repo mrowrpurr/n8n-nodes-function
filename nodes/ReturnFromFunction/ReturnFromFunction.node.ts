@@ -17,15 +17,16 @@ export class ReturnFromFunction implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
-				displayName: "Return Value",
-				name: "returnValue",
+				displayName: "Return Code",
+				name: "returnCode",
 				type: "string",
 				typeOptions: {
-					alwaysOpenEditWindow: true,
+					editor: "jsEditor",
+					rows: 15,
 				},
-				default: "{{ $json }}",
-				description: "The value to return from the function. Supports expressions and literal values.",
-				placeholder: 'Enter return value, e.g. "Hello, world", 42, or {{ $json }}',
+				default: "// Return any value from this function\nreturn $json;",
+				description: "JavaScript code to determine the return value. Use 'return' statement to specify what to return.",
+				placeholder: "return { message: 'Hello', timestamp: Date.now() };",
 			},
 		],
 	}
@@ -36,10 +37,55 @@ export class ReturnFromFunction implements INodeType {
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			const returnValue = this.getNodeParameter("returnValue", itemIndex)
+			const returnCode = this.getNodeParameter("returnCode", itemIndex) as string
 			const item = items[itemIndex]
 
-			console.log("🎯 ReturnFromFunction: Return value (already evaluated) =", returnValue)
+			console.log("🎯 ReturnFromFunction: Return code =", returnCode)
+
+			// Execute the JavaScript code to get the return value
+			let parsedReturnValue: any
+			try {
+				// Create execution context with available variables
+				const context = {
+					$json: item.json,
+					$binary: item.binary,
+					$index: itemIndex,
+					$item: item,
+					console: {
+						log: (...args: any[]) => console.log("🎯 ReturnFromFunction Code:", ...args),
+						error: (...args: any[]) => console.error("🎯 ReturnFromFunction Code:", ...args),
+						warn: (...args: any[]) => console.warn("🎯 ReturnFromFunction Code:", ...args),
+					},
+					Date,
+					Math,
+					JSON,
+				}
+
+				// Wrap the code in a function to capture the return value
+				const wrappedCode = `
+					(function() {
+						// Set up context variables
+						${Object.keys(context)
+							.map((key) => `var ${key} = arguments[0]["${key}"];`)
+							.join("\n\t\t\t\t\t\t")}
+						
+						// Execute user code
+						${returnCode}
+					})
+				`
+
+				parsedReturnValue = eval(wrappedCode)(context)
+				console.log("🎯 ReturnFromFunction: Code execution result =", parsedReturnValue)
+			} catch (error) {
+				console.error("🎯 ReturnFromFunction: Code execution error:", error)
+				parsedReturnValue = {
+					_error: "Return code execution failed",
+					_errorMessage: error.message,
+					_errorCode: returnCode,
+				}
+			}
+
+			console.log("🎯 ReturnFromFunction: Final return value =", parsedReturnValue)
 
 			// Get execution ID from the registry (set by the Function node)
 			const registry = FunctionRegistry.getInstance()
@@ -54,7 +100,7 @@ export class ReturnFromFunction implements INodeType {
 			console.log("🎯 ReturnFromFunction: Setting function return value for execution:", effectiveExecutionId)
 
 			// Store the return value in the registry so the Function node can pick it up
-			registry.setFunctionReturnValue(effectiveExecutionId, returnValue)
+			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
 
 			// Pass through the item unchanged (no more internal fields to clean)
 			const resultItem: INodeExecutionData = {
