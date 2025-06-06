@@ -26,6 +26,13 @@ export class CallFunction implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
+				displayName: "Global Function",
+				name: "globalFunction",
+				type: "boolean",
+				default: false,
+				description: "Whether to call a globally registered function from any workflow",
+			},
+			{
 				displayName: "Function Name or ID",
 				name: "functionName",
 				type: "options",
@@ -34,8 +41,7 @@ export class CallFunction implements INodeType {
 				},
 				default: "",
 				required: true,
-				description:
-					'Name of the function to call (must match a Function node in this workflow). Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+				description: 'Name of the function to call. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 				placeholder: "Select a function...",
 			},
 			{
@@ -162,24 +168,60 @@ export class CallFunction implements INodeType {
 		loadOptions: {
 			async getAvailableFunctions(this: ILoadOptionsFunctions) {
 				console.log("🔧 CallFunction: Loading available functions for dropdown")
+				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
+				console.log("🔧 CallFunction: Global function mode:", globalFunction)
+
 				const registry = FunctionRegistry.getInstance()
-				const availableFunctions = registry.getAvailableFunctions()
+				let availableFunctions
+
+				if (globalFunction) {
+					// Only show global functions
+					availableFunctions = registry.getAvailableFunctions("__global__")
+				} else {
+					// Show local functions (current execution and __active__)
+					const executionId = this.getExecutionId()
+					const effectiveExecutionId = executionId ?? "__active__"
+					availableFunctions = registry.getAvailableFunctions(effectiveExecutionId)
+
+					// Also include __active__ functions if we're in a real execution
+					if (executionId && effectiveExecutionId !== "__active__") {
+						const activeFunctions = registry.getAvailableFunctions("__active__")
+						availableFunctions = [...availableFunctions, ...activeFunctions]
+					}
+				}
+
 				console.log("🔧 CallFunction: Available functions:", availableFunctions)
 				return availableFunctions
 			},
 			async getFunctionParameters(this: ILoadOptionsFunctions) {
 				const functionName = this.getCurrentNodeParameter("functionName") as string
 				const lastConfiguredFunction = this.getCurrentNodeParameter("lastConfiguredFunction") as string
+				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
 
 				console.log("🔧 CallFunction: Loading parameters for function:", functionName)
 				console.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
+				console.log("🔧 CallFunction: Global function mode:", globalFunction)
 
 				if (!functionName) {
 					return []
 				}
 
 				const registry = FunctionRegistry.getInstance()
-				const parameters = registry.getFunctionParameters(functionName)
+				let parameters
+
+				if (globalFunction) {
+					parameters = registry.getFunctionParameters(functionName, "__global__")
+				} else {
+					const executionId = this.getExecutionId()
+					const effectiveExecutionId = executionId ?? "__active__"
+					parameters = registry.getFunctionParameters(functionName, effectiveExecutionId)
+
+					// If not found with current execution, try __active__ fallback
+					if (parameters.length === 0 && effectiveExecutionId !== "__active__") {
+						parameters = registry.getFunctionParameters(functionName, "__active__")
+					}
+				}
+
 				console.log("🔧 CallFunction: Found parameters:", parameters)
 
 				// Get currently selected parameters
@@ -261,11 +303,13 @@ export class CallFunction implements INodeType {
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
 			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
 			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex, "") as string
 
+			console.log("🔧 CallFunction: Global function =", globalFunction)
 			console.log("🔧 CallFunction: Function name =", functionName)
 			console.log("🔧 CallFunction: Parameter mode =", parameterMode)
 			console.log("🔧 CallFunction: Store response =", storeResponse)
@@ -277,7 +321,21 @@ export class CallFunction implements INodeType {
 
 			// Get function parameter definitions for validation
 			const registry = FunctionRegistry.getInstance()
-			const functionParameterDefs = registry.getFunctionParameters(functionName)
+			let functionParameterDefs
+
+			if (globalFunction) {
+				functionParameterDefs = registry.getFunctionParameters(functionName, "__global__")
+			} else {
+				const executionId = this.getExecutionId()
+				const effectiveExecutionId = executionId ?? "__active__"
+				functionParameterDefs = registry.getFunctionParameters(functionName, effectiveExecutionId)
+
+				// If not found with current execution, try __active__ fallback
+				if (functionParameterDefs.length === 0 && effectiveExecutionId !== "__active__") {
+					functionParameterDefs = registry.getFunctionParameters(functionName, "__active__")
+				}
+			}
+
 			const validParameterNames = new Set(functionParameterDefs.map((p) => p.name))
 
 			// Prepare parameters to pass to the function
@@ -342,23 +400,29 @@ export class CallFunction implements INodeType {
 			console.log("🔧 CallFunction: Implementing actual function triggering")
 			console.log("🔧 CallFunction: Calling function:", functionName, "with params:", functionParameters)
 
-			// Get the execution ID to find the correct function instance
-			const executionId = this.getExecutionId()
-			// Use same fallback as Function node for active workflows
-			const effectiveExecutionId = executionId ?? "__active__"
-			console.log("🔧 CallFunction: Execution ID =", effectiveExecutionId)
-			console.log("🔧 CallFunction: Raw execution ID =", executionId)
+			// Determine the execution ID to use based on global function setting
+			let targetExecutionId: string
+
+			if (globalFunction) {
+				targetExecutionId = "__global__"
+			} else {
+				const executionId = this.getExecutionId()
+				targetExecutionId = executionId ?? "__active__"
+			}
+
+			console.log("🔧 CallFunction: Target execution ID =", targetExecutionId)
+			console.log("🔧 CallFunction: Global function =", globalFunction)
 
 			// Use the registry instance to call the function
 			const item = items[itemIndex]
 
 			try {
-				// Try to call the function with current execution ID first, then fallback to "__active__"
-				let functionResult = await registry.callFunction(functionName, effectiveExecutionId, functionParameters, item)
-				let actualExecutionId = effectiveExecutionId
+				// Try to call the function with target execution ID
+				let functionResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
+				let actualExecutionId = targetExecutionId
 
-				// If not found with current execution ID, try with "__active__" fallback
-				if (functionResult === null && effectiveExecutionId !== "__active__") {
+				// If not found and not global, try with "__active__" fallback
+				if (functionResult === null && !globalFunction && targetExecutionId !== "__active__") {
 					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
 					functionResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
 					actualExecutionId = "__active__"

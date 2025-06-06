@@ -12,9 +12,11 @@ Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal En
 - 🧱 **Define reusable logic** with named [`Function`](./nodes/Function/Function.node.ts) nodes
 - 📞 **Call functions** with dynamic parameters using [`CallFunction`](./nodes/CallFunction/CallFunction.node.ts)
 - 🔁 **Return values cleanly** using [`ReturnFromFunction`](./nodes/ReturnFromFunction/ReturnFromFunction.node.ts)
+- 🌍 **Global functions** - share logic across workflows
 - 🧼 **Clean data flow** - no internal metadata in `item.json`
-- ⚡ **Optional inline JavaScript** execution for side effects
+- ⚡ **Smart parameter merging** - parameters always available downstream
 - 🎯 **Composable workflows** with function-style abstraction
+- 🔒 **Safe code execution** using n8n's built-in sandboxing
 
 ---
 
@@ -46,18 +48,33 @@ pnpm build
 
 ### 🧱 Function Node
 
-Defines a named, reusable function with parameters that can be called from anywhere in your workflow.
+Defines a named, reusable function with parameters that can be called from within your workflow or globally across all workflows.
 
 **Key Features:**
+- **Global Function toggle** - enable cross-workflow function sharing
 - Named function definition
 - Parameter specification with types and defaults
 - Optional inline JavaScript execution
-- Clean item passthrough
+- **Smart parameter injection** - parameters are always included in output
+
+**Function Scope:**
+- 🏠 **Local Functions** (default): Available only within the current workflow
+- 🌍 **Global Functions**: Available across all workflows in your n8n instance
+
+**Parameter Behavior:**
+- ✅ **Always available**: Parameters are injected into the output item
+- ✅ **Code disabled**: Parameters become the output data
+- ✅ **Code enabled**: Parameters merge with returned values
 
 ```javascript
-// Example inline code (optional)
-item.processed = true;
-item.timestamp = new Date().toISOString();
+// Example: Parameters { text: "hello", count: 5 }
+// With this code:
+console.log("Processing:", text);
+return {
+  text: "world",     // Overrides parameter
+  processed: true    // New field
+};
+// Result: { text: "world", count: 5, processed: true }
 ```
 
 ![Function Node Screenshot](./docs/screenshots/function-node.png)
@@ -67,17 +84,26 @@ item.timestamp = new Date().toISOString();
 
 ### 📞 CallFunction Node
 
-Invokes a defined function with parameters and optionally stores the return value.
+Invokes a defined function with parameters and optionally stores the return value. Can call local functions within the current workflow or global functions from any workflow.
 
 **Key Features:**
-- Dynamic function selection
+- **Global Function toggle** - call functions from any workflow
+- Dynamic function selection (filtered by scope)
 - Parameter passing (individual or JSON)
 - Optional return value storage
 - Clean error handling
 
+**Function Scope:**
+- 🏠 **Local Functions** (default): Only shows functions from current workflow
+- 🌍 **Global Functions**: Only shows globally registered functions
+
 **Parameter Modes:**
 - **Individual Parameters**: Configure each parameter separately
 - **JSON Object**: Pass all parameters as a single JSON object
+
+**Return Value Storage:**
+- Toggle "Store Response" to capture ReturnFromFunction values
+- Specify variable name to store the response
 
 ![CallFunction Node Screenshot](./docs/screenshots/callfunction-node.png)
 *📸 Screenshot placeholder: CallFunction node with parameters*
@@ -106,9 +132,45 @@ Explicitly returns a value from within a function execution context.
 
 ---
 
+## 🎯 Parameter Merging Behavior
+
+### When Code is Disabled
+```yaml
+Function Parameters: { name: "John", age: 30 }
+Code Execution: false
+Output: { name: "John", age: 30 }
+```
+
+### When Code Returns Nothing
+```javascript
+// Parameters: { name: "John", age: 30 }
+console.log("Hello", name);
+// No return statement
+// Output: { name: "John", age: 30 }
+```
+
+### When Code Returns an Object
+```javascript
+// Parameters: { name: "John", age: 30 }
+return { 
+  name: "Jane",        // Overrides parameter
+  processed: true      // New field
+};
+// Output: { name: "Jane", age: 30, processed: true }
+```
+
+### When Code Returns a Primitive
+```javascript
+// Parameters: { name: "John", age: 30 }
+return "success";
+// Output: { name: "John", age: 30, result: "success" }
+```
+
+---
+
 ## 🧪 Example Workflows
 
-### Basic Function Call
+### Basic Local Function Call
 
 ```mermaid
 graph TD
@@ -122,6 +184,22 @@ graph TD
 
 ![Basic Workflow Screenshot](./docs/screenshots/basic-workflow.png)
 *📸 Screenshot placeholder: Basic function call workflow*
+
+### Global Function Across Workflows
+
+```mermaid
+graph TD
+    A[Workflow A: Define Global Function] --> B[Function: formatData]
+    B -.->|Registered Globally| C[Global Registry]
+    
+    D[Workflow B: Use Global Function] --> E[CallFunction: formatData]
+    E -.->|Calls| C
+    C --> F[Return Result]
+    F --> G[Workflow B Continues]
+```
+
+![Global Function Screenshot](./docs/screenshots/global-workflow.png)
+*📸 Screenshot placeholder: Global function across workflows*
 
 ### Advanced: Function with Parameters
 
@@ -142,9 +220,10 @@ graph TD
 
 ## 🛠️ Configuration Examples
 
-### Function Node Configuration
+### Local Function Node Configuration
 
 ```yaml
+Global Function: false
 Function Name: calculateTotal
 Parameters:
   - name: items
@@ -159,14 +238,59 @@ Parameters:
 
 Enable Code Execution: true
 Code: |
-  // Optional side effects
-  item.calculationStarted = new Date().toISOString();
-  console.log(`Calculating total for ${item.json.items.length} items`);
+  // Parameters 'items' and 'taxRate' are automatically available
+  const subtotal = items.reduce((sum, item) => sum + item.price, 0);
+  const tax = subtotal * taxRate;
+  
+  return {
+    subtotal: subtotal,
+    tax: tax,
+    total: subtotal + tax,
+    itemCount: items.length
+  };
+  // Result includes all parameters plus returned fields
 ```
 
-### CallFunction Node Configuration
+### Global Function Node Configuration
 
 ```yaml
+Global Function: true
+Function Name: formatUserData
+Parameters:
+  - name: userData
+    type: object
+    required: true
+    description: "Raw user data to format"
+  - name: includeMetadata
+    type: boolean
+    required: false
+    defaultValue: "true"
+    description: "Whether to include metadata fields"
+
+Enable Code Execution: true
+Code: |
+  // This function is available across all workflows
+  const formatted = {
+    id: userData.id,
+    name: userData.fullName || `${userData.firstName} ${userData.lastName}`,
+    email: userData.email.toLowerCase(),
+    active: userData.status === 'active'
+  };
+  
+  if (includeMetadata) {
+    formatted.metadata = {
+      lastLogin: userData.lastLogin,
+      createdAt: userData.createdAt
+    };
+  }
+  
+  return formatted;
+```
+
+### Local CallFunction Node Configuration
+
+```yaml
+Global Function: false
 Function Name: calculateTotal
 Parameter Mode: Individual Parameters
 Parameters:
@@ -176,7 +300,23 @@ Parameters:
     value: "0.10"
 
 Store Response: true
-Response Variable Name: "totalResult"
+Response Variable Name: "calculationResult"
+```
+
+### Global CallFunction Node Configuration
+
+```yaml
+Global Function: true
+Function Name: formatUserData
+Parameter Mode: Individual Parameters
+Parameters:
+  - name: userData
+    value: "{{ $json.user }}"
+  - name: includeMetadata
+    value: "false"
+
+Store Response: true
+Response Variable Name: "formattedUser"
 ```
 
 ### ReturnFromFunction Node Configuration
@@ -184,10 +324,9 @@ Response Variable Name: "totalResult"
 ```yaml
 Return Value: |
   {
-    "subtotal": {{ $json.subtotal }},
-    "tax": {{ $json.tax }},
-    "total": {{ $json.total }},
-    "itemCount": {{ $json.items.length }}
+    "status": "completed",
+    "processedAt": "{{ new Date().toISOString() }}",
+    "result": {{ $json.total }}
   }
 ```
 
@@ -208,19 +347,76 @@ The system automatically validates parameters against the function signature:
 
 Functions are isolated by execution context:
 
-- Each workflow execution gets its own function registry
-- Return values are tracked per execution
+- **Local functions**: Scoped to the current workflow execution
+- **Global functions**: Available across all workflows and executions
+- Return values are tracked per execution context
 - Clean separation between concurrent executions
-- No cross-execution data leakage
+- No cross-execution data leakage (except for intentional global functions)
 
-### Error Handling
+### Parameter Conflict Resolution
 
-Robust error handling at every level:
+When code returns an object, conflicts are resolved as follows:
 
-- **Function not found**: Clear error message with available functions
-- **Parameter validation**: Detailed parameter mismatch information
-- **JSON parsing**: Helpful syntax error messages
-- **Execution errors**: Full stack traces with context
+1. **Parameters are merged first** (always available)
+2. **Returned object values override** parameters with same keys
+3. **New fields from returned object** are added
+4. **Parameters not in returned object** are preserved
+
+```javascript
+// Parameters: { id: 1, name: "test", status: "pending" }
+return { name: "updated", category: "new" };
+// Final output: { id: 1, name: "updated", status: "pending", category: "new" }
+```
+
+---
+
+## 🌍 Global Functions
+
+### Overview
+
+Global functions allow you to create reusable logic that can be called from any workflow in your n8n instance. This is perfect for:
+
+- **Utility functions** (formatting, validation, calculations)
+- **Common business logic** shared across multiple workflows
+- **Centralized data processing** functions
+
+### How Global Functions Work
+
+1. **Registration**: When a Function node with "Global Function" enabled is executed, it registers itself in the global scope
+2. **Discovery**: CallFunction nodes with "Global Function" enabled only see globally registered functions
+3. **Execution**: Global functions work identically to local functions but are accessible cross-workflow
+4. **Return Values**: ReturnFromFunction works seamlessly with global functions
+
+### Best Practices
+
+- **Naming Convention**: Use descriptive names like `formatUserData` or `calculateTax`
+- **Documentation**: Always provide clear parameter descriptions
+- **Version Control**: Consider using version numbers in function names for breaking changes
+- **Error Handling**: Include robust error handling in global functions since they're used across workflows
+
+### Example Use Cases
+
+```javascript
+// Global utility function for data formatting
+// Function Name: formatCurrency
+return {
+  formatted: new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency || 'USD'
+  }).format(amount),
+  raw: amount
+};
+```
+
+```javascript
+// Global validation function
+// Function Name: validateEmail
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+return {
+  isValid: emailRegex.test(email),
+  normalized: email.toLowerCase().trim()
+};
+```
 
 ---
 
@@ -278,7 +474,7 @@ The central registry managing function definitions and return values.
 
 #### Methods
 
-- [`registerFunction(name, executionId, callback)`](./nodes/FunctionRegistry.ts:30) - Register a function
+- [`registerFunction(name, executionId, nodeId, params, callback)`](./nodes/FunctionRegistry.ts:30) - Register a function
 - [`callFunction(name, executionId, params, item)`](./nodes/FunctionRegistry.ts:45) - Call a registered function
 - [`setFunctionReturnValue(executionId, value)`](./nodes/FunctionRegistry.ts:75) - Store return value
 - [`getFunctionReturnValue(executionId)`](./nodes/FunctionRegistry.ts:80) - Retrieve return value
@@ -291,8 +487,8 @@ The central registry managing function definitions and return values.
 const registry = FunctionRegistry.getInstance();
 
 // Register a function
-registry.registerFunction('myFunc', 'exec-123', async (params, item) => {
-  return { result: 'success' };
+registry.registerFunction('myFunc', 'exec-123', 'node-456', paramDefs, async (params, item) => {
+  return [{ json: { result: 'success', ...params }, index: 0 }];
 });
 
 // Call the function
@@ -319,6 +515,7 @@ const result = await registry.callFunction('myFunc', 'exec-123', { input: 'test'
 - ✅ Function with optional parameters and defaults
 - ✅ Function with inline code execution
 - ✅ Function returning complex JSON objects
+- ✅ Parameter merging with returned objects
 - ✅ Multiple function calls in same workflow
 - ✅ Error handling for missing functions
 - ✅ Parameter validation and type conversion
@@ -344,6 +541,17 @@ const result = await registry.callFunction('myFunc', 'exec-123', { input: 'test'
 - Use the JSON parameter mode for complex objects
 - Check for proper escaping of quotes and special characters
 
+#### Schema 404 Warning
+```
+GET http://localhost:5678/schemas/CUSTOM.function/1.0.0.json 404 (Not Found)
+```
+This is harmless - n8n tries to load a JSON schema for validation but falls back to the node's internal properties definition when not found.
+
+#### Parameters Not Available
+- Parameters are automatically injected into the output item
+- Check that your Function node has the latest version
+- Verify that parameter names don't conflict with built-in properties
+
 ---
 
 ## 📸 Screenshots
@@ -362,8 +570,22 @@ To add screenshots for better documentation:
 - [ ] `docs/screenshots/returnfromfunction-node.png` - ReturnFromFunction with return value
 - [ ] `docs/screenshots/basic-workflow.png` - Simple function call workflow
 - [ ] `docs/screenshots/advanced-workflow.png` - Complex workflow with parameters
-- [ ] `docs/screenshots/parameter-validation.png` - Parameter validation in action
+- [ ] `docs/screenshots/parameter-merging.png` - Parameter merging examples
 - [ ] `docs/screenshots/error-handling.png` - Error message examples
+
+---
+
+## 🆕 What's New
+
+### Latest Version Features
+
+- 🌍 **Global Functions**: Share functions across workflows with a simple toggle
+- ✅ **Smart Parameter Injection**: Parameters are always available in the output item
+- ✅ **Intelligent Merging**: Returned objects merge with parameters (returned keys win)
+- ✅ **Clean Data Flow**: No internal metadata pollution in `item.json`
+- ✅ **Improved Error Handling**: Better validation and error messages
+- ✅ **Execution Context Isolation**: Clean separation between concurrent executions
+- ✅ **Scoped Function Discovery**: Dropdown filters functions by local/global scope
 
 ---
 

@@ -84,11 +84,15 @@ class FunctionRegistry {
 		}
 	}
 
-	getAvailableFunctions(): Array<{ name: string; value: string }> {
+	getAvailableFunctions(executionId?: string): Array<{ name: string; value: string }> {
 		const functionNames = new Set<string>()
 
 		// Extract unique function names from registered listeners
 		for (const listener of this.listeners.values()) {
+			// If executionId is specified, only include functions for that execution
+			if (executionId && listener.executionId !== executionId) {
+				continue
+			}
 			functionNames.add(listener.functionName)
 		}
 
@@ -99,7 +103,16 @@ class FunctionRegistry {
 		}))
 	}
 
-	getFunctionParameters(functionName: string): ParameterDefinition[] {
+	getFunctionParameters(functionName: string, executionId?: string): ParameterDefinition[] {
+		// If executionId is specified, look for that specific function instance
+		if (executionId) {
+			const key = `${functionName}-${executionId}`
+			const listener = this.listeners.get(key)
+			if (listener) {
+				return listener.parameters
+			}
+		}
+
 		// Look for the function with __active__ execution ID first
 		const activeKey = `${functionName}-__active__`
 		const activeListener = this.listeners.get(activeKey)

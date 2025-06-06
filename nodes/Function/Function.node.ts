@@ -27,12 +27,19 @@ export class Function implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
+				displayName: "Global Function",
+				name: "globalFunction",
+				type: "boolean",
+				default: false,
+				description: "Whether this function will be registered globally and callable from any workflow",
+			},
+			{
 				displayName: "Function Name",
 				name: "functionName",
 				type: "string",
 				default: "myFunction",
 				required: true,
-				description: "Unique name for this function within the workflow",
+				description: "Unique name for this function. If global, must be unique across all workflows.",
 			},
 			{
 				displayName: "Function Parameters",
@@ -146,6 +153,7 @@ export class Function implements INodeType {
 		console.log("🎯 Function: Starting trigger setup")
 
 		// Get function configuration
+		const globalFunction = this.getNodeParameter("globalFunction") as boolean
 		const functionName = this.getNodeParameter("functionName") as string
 		const parameters = this.getNodeParameter("parameters", {}) as any
 		const parameterList = parameters.parameter || []
@@ -156,10 +164,16 @@ export class Function implements INodeType {
 		const executionId = this.getExecutionId()
 		const nodeId = this.getNode().id
 
-		// Use fallback execution ID when workflow is active (executionId is undefined)
-		const effectiveExecutionId = executionId ?? "__active__"
+		// Determine effective execution ID based on global function setting
+		let effectiveExecutionId: string
+		if (globalFunction) {
+			effectiveExecutionId = "__global__"
+		} else {
+			effectiveExecutionId = executionId ?? "__active__"
+		}
 
 		console.log("🎯 Function: Registering function:", functionName, "with execution:", effectiveExecutionId)
+		console.log("🎯 Function: Global function:", globalFunction)
 		console.log("🎯 Function: Raw execution ID:", executionId)
 		console.log("🎯 Function: Parameter list:", parameterList)
 
