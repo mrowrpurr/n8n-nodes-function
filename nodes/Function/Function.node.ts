@@ -278,6 +278,12 @@ export class Function implements INodeType {
 								result,
 							}
 						}
+					} else {
+						// If no return value, inject locals into output
+						outputItem.json = {
+							...outputItem.json,
+							...locals,
+						}
 					}
 				} catch (error) {
 					console.error("🎯 Function: Code execution error:", error)
@@ -285,6 +291,12 @@ export class Function implements INodeType {
 						...outputItem.json,
 						_codeError: error.message,
 					}
+				}
+			} else {
+				// If code is disabled, inject locals into output
+				outputItem.json = {
+					...outputItem.json,
+					...locals,
 				}
 			}
 
