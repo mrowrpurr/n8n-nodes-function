@@ -130,8 +130,9 @@ export class Function implements INodeType {
 					rows: 15,
 				},
 				default:
-					"// Parameters are available as global variables\n// Example: if you have a 'name' parameter, use it directly\n// console.log('Hello', name);\n\n// Return data by modifying the item\nreturn { ...item, processed: true };",
-				description: "JavaScript code to execute. Parameters are available as global variables. Return an object to modify the output.",
+					"// Parameters are available as global variables\n// Example: if you have a 'name' parameter, use it directly\n// console.log('Hello', name);\n\n// Process your parameters, call APIs, do calculations, etc.\n// const result = someCalculation(param1, param2);\n// console.log('Processed:', result);\n\n// Optionally return an object to add fields to the flowing item:\n// return { calculatedValue: result, timestamp: Date.now() };\n\n// To return from the function, use a 'Return from Function' node",
+				description:
+					"JavaScript code to execute within the function. Parameters are available as global variables. Returned objects add fields to the item flowing through the function.",
 				displayOptions: {
 					show: {
 						enableCode: [true],
