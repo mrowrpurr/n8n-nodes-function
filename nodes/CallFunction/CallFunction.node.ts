@@ -56,6 +56,11 @@ export class CallFunction implements INodeType {
 				],
 				default: "individual",
 				description: "How to specify the function parameters",
+				displayOptions: {
+					hide: {
+						functionName: [""],
+					},
+				},
 			},
 			{
 				displayName: "Parameters JSON",
@@ -83,6 +88,9 @@ export class CallFunction implements INodeType {
 				displayOptions: {
 					show: {
 						parameterMode: ["individual"],
+					},
+					hide: {
+						functionName: [""],
 					},
 				},
 				options: [
