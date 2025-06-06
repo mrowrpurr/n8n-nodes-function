@@ -49,27 +49,24 @@ export class ReturnFromFunction implements INodeType {
 
 			console.log("🎯 ReturnFromFunction: Parsed return value =", parsedReturnValue)
 
-			// Get execution ID from the item (injected by Function node)
-			const functionExecutionId = item.json.__functionExecutionId
-			console.log("🎯 ReturnFromFunction: Function execution ID from item:", functionExecutionId)
+			// Get execution ID from the registry (set by the Function node)
+			const registry = FunctionRegistry.getInstance()
+			const functionExecutionId = registry.getCurrentFunctionExecution()
+			console.log("🎯 ReturnFromFunction: Function execution ID from registry:", functionExecutionId)
 
 			if (!functionExecutionId) {
-				console.warn("🎯 ReturnFromFunction: No __functionExecutionId found in item - this ReturnFromFunction may not be connected to a Function node")
+				console.warn("🎯 ReturnFromFunction: No current function execution found - this ReturnFromFunction may not be connected to a Function node")
 			}
 
 			const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
 			console.log("🎯 ReturnFromFunction: Setting function return value for execution:", effectiveExecutionId)
 
 			// Store the return value in the registry so the Function node can pick it up
-			const registry = FunctionRegistry.getInstance()
 			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
 
-			// Pass through the item but remove the internal __functionExecutionId
-			const cleanedJson = { ...item.json }
-			delete cleanedJson.__functionExecutionId
-
+			// Pass through the item unchanged (no more internal fields to clean)
 			const resultItem: INodeExecutionData = {
-				json: cleanedJson,
+				json: item.json,
 				index: itemIndex,
 				binary: item.binary,
 			}

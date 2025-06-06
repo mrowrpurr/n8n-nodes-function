@@ -169,6 +169,9 @@ export class Function implements INodeType {
 			console.log("🎯 Function: Callback invoked with parameters:", functionParameters)
 			console.log("🎯 Function: Input item:", inputItem)
 
+			// Set current function execution context for ReturnFromFunction nodes
+			registry.setCurrentFunctionExecution(effectiveExecutionId)
+
 			// Clear any existing return value for this execution
 			registry.clearFunctionReturnValue(effectiveExecutionId)
 
@@ -224,7 +227,6 @@ export class Function implements INodeType {
 				json: {
 					...inputItem.json,
 					locals,
-					__functionExecutionId: effectiveExecutionId,
 				},
 				index: 0,
 				binary: inputItem.binary,
@@ -295,6 +297,9 @@ export class Function implements INodeType {
 			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			console.log("🎯 Function: Function execution completed, checking for return value")
+
+			// Clear the current function execution context
+			registry.clearCurrentFunctionExecution()
 
 			// Function completed - this represents a void function (no explicit return)
 			return []

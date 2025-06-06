@@ -20,6 +20,7 @@ class FunctionRegistry {
 	private static instance: FunctionRegistry
 	private listeners: Map<string, FunctionListener> = new Map()
 	private returnValues: Map<string, any> = new Map()
+	private currentFunctionExecution: string | null = null
 
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
@@ -130,6 +131,21 @@ class FunctionRegistry {
 	clearFunctionReturnValue(executionId: string): void {
 		console.log("🎯 FunctionRegistry: Clearing return value for execution:", executionId)
 		this.returnValues.delete(executionId)
+	}
+
+	setCurrentFunctionExecution(executionId: string): void {
+		console.log("🎯 FunctionRegistry: Setting current function execution:", executionId)
+		this.currentFunctionExecution = executionId
+	}
+
+	getCurrentFunctionExecution(): string | null {
+		console.log("🎯 FunctionRegistry: Getting current function execution:", this.currentFunctionExecution)
+		return this.currentFunctionExecution
+	}
+
+	clearCurrentFunctionExecution(): void {
+		console.log("🎯 FunctionRegistry: Clearing current function execution")
+		this.currentFunctionExecution = null
 	}
 }
 
