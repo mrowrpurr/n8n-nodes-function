@@ -19,6 +19,7 @@ interface FunctionListener {
 class FunctionRegistry {
 	private static instance: FunctionRegistry
 	private listeners: Map<string, FunctionListener> = new Map()
+	private returnValues: Map<string, any> = new Map()
 
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
@@ -113,6 +114,22 @@ class FunctionRegistry {
 		}
 
 		return []
+	}
+
+	setFunctionReturnValue(executionId: string, returnValue: any): void {
+		console.log("🎯 FunctionRegistry: Setting return value for execution:", executionId, "value:", returnValue)
+		this.returnValues.set(executionId, returnValue)
+	}
+
+	getFunctionReturnValue(executionId: string): any | null {
+		const returnValue = this.returnValues.get(executionId)
+		console.log("🎯 FunctionRegistry: Getting return value for execution:", executionId, "value:", returnValue)
+		return returnValue || null
+	}
+
+	clearFunctionReturnValue(executionId: string): void {
+		console.log("🎯 FunctionRegistry: Clearing return value for execution:", executionId)
+		this.returnValues.delete(executionId)
 	}
 }
 

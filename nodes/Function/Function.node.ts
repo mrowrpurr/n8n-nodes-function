@@ -169,6 +169,9 @@ export class Function implements INodeType {
 			console.log("🎯 Function: Callback invoked with parameters:", functionParameters)
 			console.log("🎯 Function: Input item:", inputItem)
 
+			// Clear any existing return value for this execution
+			registry.clearFunctionReturnValue(effectiveExecutionId)
+
 			// Process parameters according to function definition
 			const locals: Record<string, any> = {}
 
@@ -221,6 +224,7 @@ export class Function implements INodeType {
 				json: {
 					...inputItem.json,
 					locals,
+					__functionExecutionId: effectiveExecutionId,
 				},
 				index: 0,
 				binary: inputItem.binary,
@@ -231,7 +235,7 @@ export class Function implements INodeType {
 				console.log("🎯 Function: Executing JavaScript code")
 
 				try {
-					// Execute JavaScript code with parameters as global variables using vm2
+					// Execute JavaScript code with parameters as global variables
 					const context = {
 						...locals,
 						item: outputItem.json,
@@ -284,11 +288,16 @@ export class Function implements INodeType {
 
 			console.log("🎯 Function: Final output item =", outputItem)
 
-			// Emit the data to trigger downstream nodes
+			// Emit the data to trigger downstream nodes (including potential ReturnFromFunction)
 			this.emit([this.helpers.returnJsonArray([outputItem])])
 
-			// Return the result for the CallFunction node
-			return [outputItem]
+			// Wait a short time for downstream execution to complete
+			await new Promise((resolve) => setTimeout(resolve, 100))
+
+			console.log("🎯 Function: Function execution completed, checking for return value")
+
+			// Function completed - this represents a void function (no explicit return)
+			return []
 		}
 
 		// Convert parameter list to ParameterDefinition format

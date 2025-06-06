@@ -127,6 +127,34 @@ export class CallFunction implements INodeType {
 					},
 				],
 			},
+			{
+				displayName: "Store Response",
+				name: "storeResponse",
+				type: "boolean",
+				default: false,
+				description: "Whether to store the function's return value in the output item",
+				displayOptions: {
+					hide: {
+						functionName: [""],
+					},
+				},
+			},
+			{
+				displayName: "Response Variable Name",
+				name: "responseVariableName",
+				type: "string",
+				default: "functionResult",
+				description: "Name of the variable to store the function response under",
+				placeholder: "functionResult",
+				displayOptions: {
+					show: {
+						storeResponse: [true],
+					},
+					hide: {
+						functionName: [""],
+					},
+				},
+			},
 		],
 	}
 
@@ -235,9 +263,13 @@ export class CallFunction implements INodeType {
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
+			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
+			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex) as string
 
 			console.log("🔧 CallFunction: Function name =", functionName)
 			console.log("🔧 CallFunction: Parameter mode =", parameterMode)
+			console.log("🔧 CallFunction: Store response =", storeResponse)
+			console.log("🔧 CallFunction: Response variable name =", responseVariableName)
 
 			if (!functionName) {
 				throw new NodeOperationError(this.getNode(), "Function name is required")
@@ -323,11 +355,13 @@ export class CallFunction implements INodeType {
 			try {
 				// Try to call the function with current execution ID first, then fallback to "__active__"
 				let functionResult = await registry.callFunction(functionName, effectiveExecutionId, functionParameters, item)
+				let actualExecutionId = effectiveExecutionId
 
 				// If not found with current execution ID, try with "__active__" fallback
 				if (functionResult === null && effectiveExecutionId !== "__active__") {
 					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
 					functionResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
+					actualExecutionId = "__active__"
 				}
 
 				if (functionResult === null) {
@@ -335,23 +369,29 @@ export class CallFunction implements INodeType {
 				}
 
 				console.log("🔧 CallFunction: Function returned result =", functionResult)
+				console.log("🔧 CallFunction: Using execution ID for return value:", actualExecutionId)
 
-				// Use the result from the function call
-				// The function result should contain the processed data with locals
+				// Check if function returned a value via ReturnFromFunction node
+				const returnValue = registry.getFunctionReturnValue(actualExecutionId)
+				console.log("🔧 CallFunction: Function return value =", returnValue)
+
+				// Clear the return value from registry after retrieving it
+				if (returnValue !== null) {
+					registry.clearFunctionReturnValue(actualExecutionId)
+				}
+
+				// Start with the original item
+				let resultJson: any = { ...item.json }
+
+				// Only store the return value if storeResponse is enabled and we have a return value
+				if (storeResponse && returnValue !== null && responseVariableName && responseVariableName.trim()) {
+					resultJson[responseVariableName] = returnValue
+				}
+
 				const resultItem: INodeExecutionData = {
-					json: {
-						...item.json,
-						// Include the function result data
-						...functionResult[0]?.json,
-						// Add metadata about the function call
-						_functionCall: {
-							functionName,
-							parameters: functionParameters,
-							success: true,
-						},
-					},
+					json: resultJson,
 					index: itemIndex,
-					binary: functionResult[0]?.binary || item.binary,
+					binary: item.binary,
 				}
 
 				console.log("🔧 CallFunction: Created result item =", resultItem)

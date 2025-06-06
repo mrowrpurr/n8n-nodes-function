@@ -35,7 +35,8 @@
 		"credentials": [],
 		"nodes": [
 			"dist/nodes/Function/Function.node.js",
-			"dist/nodes/CallFunction/CallFunction.node.js"
+			"dist/nodes/CallFunction/CallFunction.node.js",
+			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js"
 		]
 	},
 	"devDependencies": {
