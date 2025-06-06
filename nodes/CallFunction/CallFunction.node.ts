@@ -264,7 +264,7 @@ export class CallFunction implements INodeType {
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
 			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
-			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex) as string
+			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex, "") as string
 
 			console.log("🔧 CallFunction: Function name =", functionName)
 			console.log("🔧 CallFunction: Parameter mode =", parameterMode)
