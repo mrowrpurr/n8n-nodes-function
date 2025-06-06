@@ -19,10 +19,13 @@ export class ReturnFromFunction implements INodeType {
 			{
 				displayName: "Return Value",
 				name: "returnValue",
-				type: "json",
-				default: "{}",
-				description: "The value to return from the function. Can be a JSON object or expression.",
-				placeholder: '{"result": "success", "data": {...}}',
+				type: "string",
+				typeOptions: {
+					alwaysOpenEditWindow: true,
+				},
+				default: "{{ $json }}",
+				description: "The value to return from the function. Supports expressions and literal values.",
+				placeholder: 'Enter return value, e.g. "Hello, world", 42, or {{ $json }}',
 			},
 		],
 	}
@@ -33,21 +36,10 @@ export class ReturnFromFunction implements INodeType {
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			const returnValue = this.getNodeParameter("returnValue", itemIndex) as string
+			const returnValue = this.getNodeParameter("returnValue", itemIndex)
 			const item = items[itemIndex]
 
-			console.log("🎯 ReturnFromFunction: Raw return value =", returnValue)
-
-			// Parse the return value
-			let parsedReturnValue: any
-			try {
-				parsedReturnValue = JSON.parse(returnValue)
-			} catch (error) {
-				// If it's not valid JSON, treat it as a string
-				parsedReturnValue = returnValue
-			}
-
-			console.log("🎯 ReturnFromFunction: Parsed return value =", parsedReturnValue)
+			console.log("🎯 ReturnFromFunction: Return value (already evaluated) =", returnValue)
 
 			// Get execution ID from the registry (set by the Function node)
 			const registry = FunctionRegistry.getInstance()
@@ -62,7 +54,7 @@ export class ReturnFromFunction implements INodeType {
 			console.log("🎯 ReturnFromFunction: Setting function return value for execution:", effectiveExecutionId)
 
 			// Store the return value in the registry so the Function node can pick it up
-			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
+			registry.setFunctionReturnValue(effectiveExecutionId, returnValue)
 
 			// Pass through the item unchanged (no more internal fields to clean)
 			const resultItem: INodeExecutionData = {
