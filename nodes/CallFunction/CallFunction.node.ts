@@ -1,4 +1,12 @@
-import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
+import {
+	type INodeExecutionData,
+	NodeConnectionType,
+	type IExecuteFunctions,
+	type INodeType,
+	type INodeTypeDescription,
+	type ILoadOptionsFunctions,
+	NodeOperationError,
+} from "n8n-workflow"
 import { FunctionRegistry } from "../FunctionRegistry"
 
 export class CallFunction implements INodeType {
@@ -17,13 +25,17 @@ export class CallFunction implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
-				displayName: "Function Name",
+				displayName: "Function Name or ID",
 				name: "functionName",
-				type: "string",
+				type: "options",
+				typeOptions: {
+					loadOptionsMethod: "getAvailableFunctions",
+				},
 				default: "",
 				required: true,
-				description: "Name of the function to call (must match a Function node in this workflow)",
-				placeholder: "myFunction",
+				description:
+					'Name of the function to call (must match a Function node in this workflow). Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+				placeholder: "Select a function...",
 			},
 			{
 				displayName: "Parameter Mode",
@@ -98,6 +110,18 @@ export class CallFunction implements INodeType {
 				],
 			},
 		],
+	}
+
+	methods = {
+		loadOptions: {
+			async getAvailableFunctions(this: ILoadOptionsFunctions) {
+				console.log("🔧 CallFunction: Loading available functions for dropdown")
+				const registry = FunctionRegistry.getInstance()
+				const availableFunctions = registry.getAvailableFunctions()
+				console.log("🔧 CallFunction: Available functions:", availableFunctions)
+				return availableFunctions
+			},
+		},
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {

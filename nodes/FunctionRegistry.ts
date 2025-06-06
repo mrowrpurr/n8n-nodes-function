@@ -69,6 +69,21 @@ class FunctionRegistry {
 			console.log(`  - ${key}: ${listener.functionName} (node: ${listener.nodeId})`)
 		}
 	}
+
+	getAvailableFunctions(): Array<{ name: string; value: string }> {
+		const functionNames = new Set<string>()
+
+		// Extract unique function names from registered listeners
+		for (const listener of this.listeners.values()) {
+			functionNames.add(listener.functionName)
+		}
+
+		// Convert to array of options for n8n dropdown
+		return Array.from(functionNames).map((name) => ({
+			name,
+			value: name,
+		}))
+	}
 }
 
 export { FunctionRegistry }
