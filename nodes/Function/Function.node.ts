@@ -265,16 +265,20 @@ export class Function implements INodeType {
 
 					console.log("🎯 Function: Code execution result =", result)
 
-					// If code returns a value, use it as the new output
+					// If code returns a value, merge it with locals
 					if (result !== undefined) {
 						if (typeof result === "object" && result !== null) {
+							// Merge locals (parameters) first, then returned object (returned object wins conflicts)
 							outputItem.json = {
 								...outputItem.json,
+								...locals,
 								...result,
 							}
 						} else {
+							// For non-object returns, include locals and the result
 							outputItem.json = {
 								...outputItem.json,
+								...locals,
 								result,
 							}
 						}
