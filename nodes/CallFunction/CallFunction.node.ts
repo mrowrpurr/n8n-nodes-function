@@ -136,7 +136,25 @@ export class CallFunction implements INodeType {
 				const parameters = registry.getFunctionParameters(functionName)
 				console.log("🔧 CallFunction: Found parameters:", parameters)
 
-				return parameters.map((param) => ({
+				// Get currently selected parameters to filter them out
+				const currentParameters = this.getCurrentNodeParameter("parameters") as any
+				const selectedParameterNames = new Set<string>()
+
+				if (currentParameters && currentParameters.parameter) {
+					for (const param of currentParameters.parameter) {
+						if (param.name) {
+							selectedParameterNames.add(param.name)
+						}
+					}
+				}
+
+				console.log("🔧 CallFunction: Already selected parameters:", Array.from(selectedParameterNames))
+
+				// Filter out already-selected parameters
+				const availableParameters = parameters.filter((param) => !selectedParameterNames.has(param.name))
+				console.log("🔧 CallFunction: Available parameters after filtering:", availableParameters)
+
+				return availableParameters.map((param) => ({
 					name: `${param.name} (${param.type})${param.required ? " *" : ""}`,
 					value: param.name,
 					description: param.description || `${param.type} parameter${param.required ? " (required)" : ""}`,
