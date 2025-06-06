@@ -189,6 +189,22 @@ export class CallFunction implements INodeType {
 						const activeFunctions = registry.getAvailableFunctions("__active__")
 						availableFunctions = [...availableFunctions, ...activeFunctions]
 					}
+
+					// If no local functions found, add a helpful message
+					if (availableFunctions.length === 0) {
+						return [
+							{
+								name: "⚠️ No Functions Available",
+								value: "__no_local_functions__",
+								description: "No local functions found. Activate the workflow to register Function nodes and refresh this list.",
+							},
+							{
+								name: "🔄 Activate Workflow to Refresh",
+								value: "__activate_workflow__",
+								description: "Click the workflow's Active toggle, then reopen this node to see available functions",
+							},
+						]
+					}
 				}
 
 				console.log("🔧 CallFunction: Available functions:", availableFunctions)
@@ -316,8 +332,8 @@ export class CallFunction implements INodeType {
 			console.log("🔧 CallFunction: Store response =", storeResponse)
 			console.log("🔧 CallFunction: Response variable name =", responseVariableName)
 
-			if (!functionName) {
-				throw new NodeOperationError(this.getNode(), "Function name is required")
+			if (!functionName || functionName === "__no_local_functions__" || functionName === "__activate_workflow__") {
+				throw new NodeOperationError(this.getNode(), "Please select a valid function. If no functions are available, activate the workflow first.")
 			}
 
 			// Get function parameter definitions for validation
