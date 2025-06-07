@@ -7,6 +7,7 @@ Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal En
 - 🧱 **Define reusable logic** with named [`Function`](./nodes/Function/Function.node.ts) nodes
 - 📞 **Call functions** with dynamic parameters using [`CallFunction`](./nodes/CallFunction/CallFunction.node.ts)
 - 🔁 **Return values cleanly** using [`ReturnFromFunction`](./nodes/ReturnFromFunction/ReturnFromFunction.node.ts)
+- 🧬 **Nested function calls** - functions can call other functions with isolated return values
 - 🌍 **Global functions** - share logic across workflows
 - 🧼 **Clean data flow** - no internal metadata in `item.json`
 - ⚡ **Smart parameter merging** - parameters always available downstream
@@ -329,6 +330,28 @@ Return Value: |
 
 ## 🔧 Advanced Usage
 
+### Nested Function Calls
+
+Functions can call other functions, creating powerful composition patterns:
+
+- ✅ **Isolated return values**: Each function call gets its own unique execution context
+- ✅ **Call context stack**: Internal stack ensures proper return value routing
+- ✅ **Automatic waiting**: System waits for `ReturnFromFunction` to execute before completing calls
+- ✅ **Deep nesting**: Supports arbitrary levels of function call nesting
+
+```mermaid
+graph TD
+    A[Function A] --> B[CallFunction: Function B]
+    B --> C[Function B]
+    C --> D[CallFunction: Function C]
+    D --> E[Function C]
+    E --> F[ReturnFromFunction C]
+    F --> G[Function B continues]
+    G --> H[ReturnFromFunction B]
+    H --> I[Function A continues]
+    I --> J[ReturnFromFunction A]
+```
+
 ### Dynamic Parameter Validation
 
 The system automatically validates parameters against the function signature:
@@ -340,13 +363,14 @@ The system automatically validates parameters against the function signature:
 
 ### Execution Context
 
-Functions are isolated by execution context:
+Functions are isolated by execution context using a call context stack:
 
 - **Local functions**: Scoped to the current workflow execution
 - **Global functions**: Available across all workflows and executions
-- Return values are tracked per execution context
-- Clean separation between concurrent executions
-- No cross-execution data leakage (except for intentional global functions)
+- **Call context stack**: Each function call gets a unique ID (`__active___call_1`, `__active___call_2`, etc.)
+- **Return value isolation**: Return values are tracked per unique call context
+- **Clean separation**: No conflicts between concurrent or nested executions
+- **Automatic cleanup**: Stack is managed automatically as functions complete
 
 ### Parameter Conflict Resolution
 
@@ -465,16 +489,19 @@ n8n-nodes-function/
 
 ### FunctionRegistry
 
-The central registry managing function definitions and return values.
+The central registry managing function definitions, return values, and call context stack.
 
 #### Methods
 
-- [`registerFunction(name, executionId, nodeId, params, callback)`](./nodes/FunctionRegistry.ts:30) - Register a function
-- [`callFunction(name, executionId, params, item)`](./nodes/FunctionRegistry.ts:45) - Call a registered function
-- [`setFunctionReturnValue(executionId, value)`](./nodes/FunctionRegistry.ts:75) - Store return value
-- [`getFunctionReturnValue(executionId)`](./nodes/FunctionRegistry.ts:80) - Retrieve return value
-- [`getAvailableFunctions()`](./nodes/FunctionRegistry.ts:65) - List available functions
-- [`getFunctionParameters(functionName)`](./nodes/FunctionRegistry.ts:70) - Get function parameters
+- [`registerFunction(name, executionId, nodeId, params, callback)`](./nodes/FunctionRegistry.ts:34) - Register a function
+- [`callFunction(name, executionId, params, item)`](./nodes/FunctionRegistry.ts:60) - Call a registered function (returns `{ result, actualExecutionId }`)
+- [`setFunctionReturnValue(executionId, value)`](./nodes/FunctionRegistry.ts:133) - Store return value
+- [`getFunctionReturnValue(executionId)`](./nodes/FunctionRegistry.ts:138) - Retrieve return value
+- [`getAvailableFunctions(executionId?)`](./nodes/FunctionRegistry.ts:87) - List available functions
+- [`getFunctionParameters(functionName, executionId?)`](./nodes/FunctionRegistry.ts:106) - Get function parameters
+- [`getCurrentCallContext()`](./nodes/FunctionRegistry.ts:203) - Get current call context from stack
+- [`pushCurrentFunctionExecution(executionId)`](./nodes/FunctionRegistry.ts:149) - Push execution context to stack
+- [`popCurrentFunctionExecution()`](./nodes/FunctionRegistry.ts:157) - Pop execution context from stack
 
 #### Example Usage
 
@@ -486,8 +513,11 @@ registry.registerFunction('myFunc', 'exec-123', 'node-456', paramDefs, async (pa
   return [{ json: { result: 'success', ...params }, index: 0 }];
 });
 
-// Call the function
-const result = await registry.callFunction('myFunc', 'exec-123', { input: 'test' }, item);
+// Call the function (returns both result and actual execution ID used)
+const { result, actualExecutionId } = await registry.callFunction('myFunc', 'exec-123', { input: 'test' }, item);
+
+// Get current call context (for nested calls)
+const currentContext = registry.getCurrentCallContext();
 ```
 
 ---
@@ -514,6 +544,82 @@ const result = await registry.callFunction('myFunc', 'exec-123', { input: 'test'
 - ✅ Multiple function calls in same workflow
 - ✅ Error handling for missing functions
 - ✅ Parameter validation and type conversion
+
+---
+
+## ⚠️ Gotchas & Notes
+
+### Workflow Activation Requirements
+
+Functions only work when their containing workflow is **Active**:
+
+- 🔴 **Inactive workflows**: Functions are not registered and cannot be called
+- 🟢 **Active workflows**: Functions are registered in the global registry
+- 🔄 **Registry updates**: Toggle Active OFF/ON to refresh function registrations after changes
+
+#### Why This Happens
+This is a limitation of how n8n works. Function nodes use the trigger mechanism to register themselves, which only occurs when workflows are activated. This is not a bug but a necessary workaround within n8n's architecture.
+
+```bash
+# To update function definitions:
+1. Make changes to Function node
+2. Toggle workflow Active OFF
+3. Toggle workflow Active ON
+4. Functions are now updated in registry
+```
+
+### Function Executions Show as Separate Runs
+
+Each function call creates its own execution entry in n8n's execution history:
+
+**Pros:**
+- ✅ **Individual debugging**: Each function call can be inspected separately
+- ✅ **Clear execution flow**: Easy to trace which functions were called and when
+- ✅ **Isolated logging**: Function-specific logs don't clutter main workflow logs
+- ✅ **Performance monitoring**: Track execution time per function
+
+**Cons:**
+- ❌ **Execution count inflation**: More entries in execution history
+- ❌ **Visual noise**: Multiple executions for what feels like a single workflow run
+- ❌ **Billing implications**: If using n8n Cloud with execution limits, each function call counts
+
+#### Example Execution Flow
+```
+Main Workflow Execution #123
+├── Function A Execution #124
+│   ├── Function B Execution #125
+│   └── Function C Execution #126
+└── Continues with result...
+```
+
+### Memory and Performance Considerations
+
+**Function Registry:**
+- Registry persists in memory for the lifetime of the n8n process
+- Global functions remain registered until n8n restarts
+- Local functions are cleaned up when workflows are deactivated
+
+**Return Value Storage:**
+- Return values are temporarily stored in memory
+- Automatic cleanup occurs after retrieval
+- Large return values may impact memory usage
+
+### Development Workflow Recommendations
+
+1. **Start Simple**: Begin with local functions before using global ones
+2. **Test Incrementally**: Use manual triggers to test function calls
+3. **Monitor Executions**: Watch execution history during development
+4. **Clear Testing**: Deactivate/reactivate workflows to ensure clean state
+5. **Version Global Functions**: Use descriptive names for global functions to avoid conflicts
+
+### Architecture Limitations We Work With
+
+These behaviors stem from working within n8n's existing architecture:
+
+- **Trigger System**: Function registration uses n8n's trigger mechanism
+- **Execution Model**: Each function call must be a separate execution for proper isolation
+- **Registry Design**: Global state management is necessary for cross-workflow functionality
+- **Return Value Handling**: Asynchronous return value capture requires polling/waiting
 
 ---
 
@@ -574,6 +680,10 @@ To add screenshots for better documentation:
 
 ### Latest Version Features
 
+- 🧬 **Nested Function Calls**: Functions can now call other functions with perfect isolation
+- 🔄 **Call Context Stack**: Advanced execution context management for nested calls
+- ⏱️ **Automatic Return Value Waiting**: System now waits for `ReturnFromFunction` to complete
+- 🎯 **Unique Call IDs**: Each function invocation gets its own execution context
 - 🌍 **Global Functions**: Share functions across workflows with a simple toggle
 - ✅ **Smart Parameter Injection**: Parameters are always available in the output item
 - ✅ **Intelligent Merging**: Returned objects merge with parameters (returned keys win)
