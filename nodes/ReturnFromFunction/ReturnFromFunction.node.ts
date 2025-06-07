@@ -102,6 +102,12 @@ export class ReturnFromFunction implements INodeType {
 			// Store the return value in the registry so the Function node can pick it up
 			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
 
+			// Pop the current function execution from the stack now that we've stored the return value
+			if (functionExecutionId) {
+				const poppedId = registry.popCurrentFunctionExecution()
+				console.log("🎯 ReturnFromFunction: Popped function execution from stack:", poppedId)
+			}
+
 			// Pass through the item unchanged (no more internal fields to clean)
 			const resultItem: INodeExecutionData = {
 				json: item.json,

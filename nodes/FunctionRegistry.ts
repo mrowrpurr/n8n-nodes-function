@@ -20,7 +20,9 @@ class FunctionRegistry {
 	private static instance: FunctionRegistry
 	private listeners: Map<string, FunctionListener> = new Map()
 	private returnValues: Map<string, any> = new Map()
-	private currentFunctionExecution: string | null = null
+	private currentFunctionExecutionStack: string[] = []
+	private nextCallId: number = 1
+	private callContextStack: string[] = [] // Stack of unique call IDs for function invocations
 
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
@@ -55,7 +57,12 @@ class FunctionRegistry {
 		this.listeners.delete(key)
 	}
 
-	async callFunction(functionName: string, executionId: string, parameters: Record<string, any>, inputItem: INodeExecutionData): Promise<INodeExecutionData[] | null> {
+	async callFunction(
+		functionName: string,
+		executionId: string,
+		parameters: Record<string, any>,
+		inputItem: INodeExecutionData
+	): Promise<{ result: INodeExecutionData[] | null; actualExecutionId: string }> {
 		const key = `${functionName}-${executionId}`
 		console.log("🔧 FunctionRegistry: Looking for function:", key)
 		console.log("🔧 FunctionRegistry: Available functions:", Array.from(this.listeners.keys()))
@@ -63,16 +70,31 @@ class FunctionRegistry {
 		const listener = this.listeners.get(key)
 		if (!listener) {
 			console.log("🔧 FunctionRegistry: Function not found:", key)
-			return null
+			return { result: null, actualExecutionId: executionId }
 		}
+
+		// Generate a unique call ID for this specific function invocation
+		const uniqueCallId = `${executionId}_call_${this.nextCallId++}`
+		console.log("🔧 FunctionRegistry: Generated unique call ID:", uniqueCallId, "for function:", key)
 
 		console.log("🔧 FunctionRegistry: Calling function:", key, "with parameters:", parameters)
 		try {
+			// Push the unique call ID to the stack so the Function callback can use it
+			this.callContextStack.push(uniqueCallId)
+			console.log("🔧 FunctionRegistry: Pushed call context:", uniqueCallId, "Stack:", this.callContextStack)
+
 			const result = await listener.callback(parameters, inputItem)
 			console.log("🔧 FunctionRegistry: Function result:", result)
-			return result
+
+			// Pop the call context
+			const poppedCallId = this.callContextStack.pop()
+			console.log("🔧 FunctionRegistry: Popped call context:", poppedCallId, "Stack:", this.callContextStack)
+
+			return { result, actualExecutionId: uniqueCallId }
 		} catch (error) {
 			console.error("🔧 FunctionRegistry: Error calling function:", error)
+			// Clean up the stack on error
+			this.callContextStack.pop()
 			throw error
 		}
 	}
@@ -146,19 +168,41 @@ class FunctionRegistry {
 		this.returnValues.delete(executionId)
 	}
 
-	setCurrentFunctionExecution(executionId: string): void {
-		console.log("🎯 FunctionRegistry: Setting current function execution:", executionId)
-		this.currentFunctionExecution = executionId
+	pushCurrentFunctionExecution(executionId: string): void {
+		console.log("🎯 FunctionRegistry: Pushing function execution to stack:", executionId)
+		console.log("🎯 FunctionRegistry: Stack before push:", this.currentFunctionExecutionStack)
+		this.currentFunctionExecutionStack.push(executionId)
+		console.log("🎯 FunctionRegistry: Stack after push:", this.currentFunctionExecutionStack)
 	}
 
 	getCurrentFunctionExecution(): string | null {
-		console.log("🎯 FunctionRegistry: Getting current function execution:", this.currentFunctionExecution)
-		return this.currentFunctionExecution
+		const current = this.currentFunctionExecutionStack[this.currentFunctionExecutionStack.length - 1] ?? null
+		console.log("🎯 FunctionRegistry: Getting current function execution:", current)
+		console.log("🎯 FunctionRegistry: Current stack:", this.currentFunctionExecutionStack)
+		return current
+	}
+
+	popCurrentFunctionExecution(): string | null {
+		const popped = this.currentFunctionExecutionStack.pop() ?? null
+		console.log("🎯 FunctionRegistry: Popped function execution from stack:", popped)
+		console.log("🎯 FunctionRegistry: Stack after pop:", this.currentFunctionExecutionStack)
+		return popped
 	}
 
 	clearCurrentFunctionExecution(): void {
-		console.log("🎯 FunctionRegistry: Clearing current function execution")
-		this.currentFunctionExecution = null
+		console.log("🎯 FunctionRegistry: Clearing entire function execution stack")
+		console.log("🎯 FunctionRegistry: Stack before clear:", this.currentFunctionExecutionStack)
+		this.currentFunctionExecutionStack = []
+	}
+
+	generateNestedCallId(baseExecutionId: string): string {
+		const nestedId = `${baseExecutionId}_nested_${this.nextCallId++}`
+		console.log("🎯 FunctionRegistry: Generated nested call ID:", nestedId, "from base:", baseExecutionId)
+		return nestedId
+	}
+
+	getCurrentCallContext(): string | undefined {
+		return this.callContextStack[this.callContextStack.length - 1]
 	}
 }
 

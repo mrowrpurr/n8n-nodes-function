@@ -435,14 +435,16 @@ export class CallFunction implements INodeType {
 
 			try {
 				// Try to call the function with target execution ID
-				let functionResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
-				let actualExecutionId = targetExecutionId
+				let callResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
+				let functionResult = callResult.result
+				let actualExecutionId = callResult.actualExecutionId
 
 				// If not found and not global, try with "__active__" fallback
 				if (functionResult === null && !globalFunction && targetExecutionId !== "__active__") {
 					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
-					functionResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
-					actualExecutionId = "__active__"
+					callResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
+					functionResult = callResult.result
+					actualExecutionId = callResult.actualExecutionId
 				}
 
 				if (functionResult === null) {

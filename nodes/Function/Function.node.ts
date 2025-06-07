@@ -176,11 +176,16 @@ export class Function implements INodeType {
 			console.log("🎯 Function: Callback invoked with parameters:", functionParameters)
 			console.log("🎯 Function: Input item:", inputItem)
 
-			// Set current function execution context for ReturnFromFunction nodes
-			registry.setCurrentFunctionExecution(effectiveExecutionId)
+			// Get the unique call ID from the call context stack
+			const currentCallContext = registry.getCurrentCallContext()
+			const currentExecutionId = currentCallContext || effectiveExecutionId
+			console.log("🎯 Function: Using execution ID:", currentExecutionId, "(call context:", currentCallContext, ")")
+
+			// Push current function execution context for ReturnFromFunction nodes
+			registry.pushCurrentFunctionExecution(currentExecutionId)
 
 			// Clear any existing return value for this execution
-			registry.clearFunctionReturnValue(effectiveExecutionId)
+			registry.clearFunctionReturnValue(currentExecutionId)
 
 			// Process parameters according to function definition
 			const locals: Record<string, any> = {}
@@ -315,13 +320,31 @@ export class Function implements INodeType {
 			// Emit the data to trigger downstream nodes (including potential ReturnFromFunction)
 			this.emit([this.helpers.returnJsonArray([outputItem])])
 
-			// Wait a short time for downstream execution to complete
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			// Wait for ReturnFromFunction to store the return value (with timeout)
+			console.log("🎯 Function: Waiting for return value to be stored...")
+			let returnValue = null
+			let waitTime = 0
+			const maxWaitTime = 5000 // 5 seconds timeout
+			const pollInterval = 50 // Check every 50ms
+
+			while (waitTime < maxWaitTime) {
+				await new Promise((resolve) => setTimeout(resolve, pollInterval))
+				waitTime += pollInterval
+
+				returnValue = registry.getFunctionReturnValue(currentExecutionId)
+				if (returnValue !== null) {
+					console.log("🎯 Function: Return value found:", returnValue)
+					break
+				}
+			}
+
+			if (waitTime >= maxWaitTime) {
+				console.log("🎯 Function: Timeout waiting for return value")
+			}
 
 			console.log("🎯 Function: Function execution completed, checking for return value")
 
-			// Clear the current function execution context
-			registry.clearCurrentFunctionExecution()
+			// Note: Stack will be popped by ReturnFromFunction node when return value is stored
 
 			// Function completed - this represents a void function (no explicit return)
 			return []
