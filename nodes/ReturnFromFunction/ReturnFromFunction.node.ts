@@ -85,12 +85,31 @@ export class ReturnFromFunction implements INodeType {
 				parsedReturnValue = eval(wrappedCode)(context)
 				console.log("🎯 ReturnFromFunction: Code execution result =", parsedReturnValue)
 			} catch (error) {
-				console.error("🎯 ReturnFromFunction: Code execution error:", error)
+				console.error("🔴 ReturnFromFunction: Code execution error:", error)
+
+				// Get execution ID for error handling
+				const registry = FunctionRegistry.getInstance()
+				const functionExecutionId = registry.getCurrentFunctionExecution()
+				const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
+
+				console.log("🔴 ReturnFromFunction: Rejecting return promise due to code execution error")
+
+				// Reject the promise with the error
+				try {
+					registry.rejectReturn(effectiveExecutionId, error)
+					console.log("🔴 ReturnFromFunction: ❌ Return promise rejected with error")
+				} catch (rejectError) {
+					console.error("🔴 ReturnFromFunction: ❌ Error rejecting return promise:", rejectError)
+				}
+
+				// Also create an error value for compatibility
 				parsedReturnValue = {
 					_error: "Return code execution failed",
 					_errorMessage: error.message,
 					_errorCode: returnCode,
 				}
+
+				// Continue with normal flow to clean up the stack
 			}
 
 			console.log("🔴 ReturnFromFunction: Final return value =", parsedReturnValue)
@@ -111,16 +130,24 @@ export class ReturnFromFunction implements INodeType {
 
 			const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
 			console.log("🔴 ReturnFromFunction: Effective execution ID for storing return value:", effectiveExecutionId)
-			console.log("🔴 ReturnFromFunction: About to store return value:", parsedReturnValue)
+			console.log("🔴 ReturnFromFunction: About to resolve return promise with value:", parsedReturnValue)
 
-			// Store the return value in the registry so the Function node can pick it up
-			console.log("🔴 ReturnFromFunction: Calling registry.setFunctionReturnValue...")
-			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
-			console.log("🔴 ReturnFromFunction: ✅ Return value stored successfully!")
+			// Resolve the return promise (this will also store the value for compatibility)
+			console.log("🔴 ReturnFromFunction: Resolving return promise...")
 
-			// Verify the value was actually stored
-			const verifyValue = registry.getFunctionReturnValue(effectiveExecutionId)
-			console.log("🔴 ReturnFromFunction: Verification - stored value retrieval:", verifyValue)
+			try {
+				registry.resolveReturn(effectiveExecutionId, parsedReturnValue)
+				console.log("🔴 ReturnFromFunction: ✅ Return promise resolved successfully!")
+
+				// Verify the value was actually stored
+				const verifyValue = registry.getFunctionReturnValue(effectiveExecutionId)
+				console.log("🔴 ReturnFromFunction: Verification - stored value retrieval:", verifyValue)
+			} catch (error) {
+				console.error("🔴 ReturnFromFunction: ❌ Error resolving return promise:", error)
+				// Fall back to direct storage if promise resolution fails
+				registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
+				console.log("🔴 ReturnFromFunction: 🟡 Fell back to direct value storage")
+			}
 
 			// Pop the current function execution from the stack now that we've stored the return value
 			if (functionExecutionId) {

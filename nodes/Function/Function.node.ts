@@ -325,64 +325,43 @@ export class Function implements INodeType {
 			this.emit([this.helpers.returnJsonArray([outputItem])])
 			console.log("🎯 Function: Data emitted successfully")
 
-			// For void functions (no downstream ReturnFromFunction), we should not wait
-			// We'll wait a short time to see if a ReturnFromFunction executes, but not the full timeout
+			// Use promise-based return handling instead of polling
+			console.log("🎯 Function: Setting up promise-based return handling...")
+
+			// Create a return promise for this execution
+			const returnPromise = registry.createReturnPromise(currentExecutionId)
+			console.log("🎯 Function: Return promise created")
+
+			// Wait briefly to detect if this is a void function
 			console.log("🎯 Function: Checking if this is a void function...")
-
+			const voidDetectionTimeout = 50 // 50ms to detect void functions
 			let returnValue = null
-			let waitTime = 0
-			const shortWaitTime = 200 // Wait 200ms to see if ReturnFromFunction starts
-			const maxWaitTime = 5000 // Full timeout if ReturnFromFunction is detected
-			const pollInterval = 50 // Check every 50ms
-			let pollAttempts = 0
-			let returnFromFunctionDetected = false
 
-			// Short initial wait to detect if ReturnFromFunction will run
-			while (waitTime < shortWaitTime) {
-				await new Promise((resolve) => setTimeout(resolve, pollInterval))
-				waitTime += pollInterval
-				pollAttempts++
+			try {
+				// Race between the return promise and a timeout for void function detection
+				returnValue = await Promise.race([
+					returnPromise,
+					new Promise<null>((resolve) => {
+						setTimeout(() => {
+							console.log("🎯 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
+							console.log("🎯 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
+							resolve(null)
+						}, voidDetectionTimeout)
+					}),
+				])
 
-				returnValue = registry.getFunctionReturnValue(currentExecutionId)
-
-				if (returnValue !== null) {
-					console.log("🎯 Function: ✅ Return value found quickly after", waitTime, "ms:", returnValue)
-					returnFromFunctionDetected = true
-					break
+				// If we got null from the timeout, this is a void function
+				if (returnValue === null) {
+					console.log("🎯 Function: 🟡 Completing immediately for void function")
+					registry.cleanupReturnPromise(currentExecutionId)
+				} else {
+					console.log("🎯 Function: ✅ Return value received via promise:", returnValue)
 				}
-			}
-
-			// If no return value found in the short wait, this is likely a void function
-			if (!returnFromFunctionDetected) {
-				console.log("🎯 Function: 🟡 No return value detected in", shortWaitTime, "ms")
-				console.log("🎯 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
-				console.log("🎯 Function: 🟡 Completing immediately without waiting for return value")
-			} else {
-				// Continue waiting up to full timeout since ReturnFromFunction was detected
-				console.log("🎯 Function: 🟢 ReturnFromFunction detected, continuing to wait...")
-
-				while (waitTime < maxWaitTime && returnValue === null) {
-					await new Promise((resolve) => setTimeout(resolve, pollInterval))
-					waitTime += pollInterval
-					pollAttempts++
-
-					returnValue = registry.getFunctionReturnValue(currentExecutionId)
-
-					// Only log every 20 attempts to reduce spam
-					if (pollAttempts % 20 === 0) {
-						console.log(`🎯 Function: Poll attempt ${pollAttempts} (${waitTime}ms): checking for return value`)
-					}
-
-					if (returnValue !== null) {
-						console.log("🎯 Function: ✅ Return value found after", waitTime, "ms:", returnValue)
-						break
-					}
-				}
-
-				if (waitTime >= maxWaitTime && returnValue === null) {
-					console.log("🎯 Function: ⏰ TIMEOUT waiting for return value after", maxWaitTime, "ms")
-					console.log("🎯 Function: ⏰ ReturnFromFunction was detected but failed to store return value")
-				}
+			} catch (error) {
+				console.error("🎯 Function: ❌ Error occurred while waiting for return value:", error)
+				registry.cleanupReturnPromise(currentExecutionId)
+				// For errors, we'll still complete the function (could add error handling here)
+				returnValue = null
 			}
 
 			console.log("🎯 Function: Function execution completed, final return value:", returnValue)

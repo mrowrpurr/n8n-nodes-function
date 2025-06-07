@@ -23,6 +23,7 @@ class FunctionRegistry {
 	private currentFunctionExecutionStack: string[] = []
 	private nextCallId: number = 1
 	private callContextStack: string[] = [] // Stack of unique call IDs for function invocations
+	private returnPromises: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map()
 
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
@@ -237,6 +238,93 @@ class FunctionRegistry {
 			console.log("🎯 FunctionRegistry: Return value entry:", key, "=", value)
 		}
 		return new Map(this.returnValues)
+	}
+
+	// Promise-based return handling methods
+	createReturnPromise(executionId: string): Promise<any> {
+		console.log("🎯 FunctionRegistry: ⭐ Creating return promise for execution:", executionId)
+
+		if (this.returnPromises.has(executionId)) {
+			console.warn("🎯 FunctionRegistry: ⚠️  Promise already exists for execution:", executionId)
+			return this.waitForReturn(executionId)
+		}
+
+		return new Promise((resolve, reject) => {
+			console.log("🎯 FunctionRegistry: ⭐ Promise created, storing resolve/reject handlers")
+			this.returnPromises.set(executionId, { resolve, reject })
+		})
+	}
+
+	waitForReturn(executionId: string): Promise<any> {
+		console.log("🎯 FunctionRegistry: 🔍 Getting return promise for execution:", executionId)
+
+		// Check if value is already available (for immediate returns)
+		const existingValue = this.returnValues.get(executionId)
+		if (existingValue !== undefined) {
+			console.log("🎯 FunctionRegistry: 🔍 Return value already available:", existingValue)
+			return Promise.resolve(existingValue)
+		}
+
+		// Check if promise exists
+		const promiseHandlers = this.returnPromises.get(executionId)
+		if (!promiseHandlers) {
+			console.log("🎯 FunctionRegistry: 🔍 No promise found, creating new one")
+			return this.createReturnPromise(executionId)
+		}
+
+		// Return a new promise that will be resolved/rejected when the stored handlers are called
+		return new Promise((resolve, reject) => {
+			const originalResolve = promiseHandlers.resolve
+			const originalReject = promiseHandlers.reject
+
+			promiseHandlers.resolve = (value: any) => {
+				originalResolve(value)
+				resolve(value)
+			}
+
+			promiseHandlers.reject = (error: any) => {
+				originalReject(error)
+				reject(error)
+			}
+		})
+	}
+
+	resolveReturn(executionId: string, value: any): void {
+		console.log("🎯 FunctionRegistry: ✅ Resolving return promise for execution:", executionId, "with value:", value)
+
+		// Store the value (for compatibility with existing getFunctionReturnValue calls)
+		this.returnValues.set(executionId, value)
+
+		// Resolve the promise if it exists
+		const promiseHandlers = this.returnPromises.get(executionId)
+		if (promiseHandlers) {
+			console.log("🎯 FunctionRegistry: ✅ Promise found, resolving...")
+			promiseHandlers.resolve(value)
+			this.returnPromises.delete(executionId)
+			console.log("🎯 FunctionRegistry: ✅ Promise resolved and cleaned up")
+		} else {
+			console.log("🎯 FunctionRegistry: 🟡 No promise found for execution, value stored for later retrieval")
+		}
+	}
+
+	rejectReturn(executionId: string, error: any): void {
+		console.log("🎯 FunctionRegistry: ❌ Rejecting return promise for execution:", executionId, "with error:", error)
+
+		// Reject the promise if it exists
+		const promiseHandlers = this.returnPromises.get(executionId)
+		if (promiseHandlers) {
+			console.log("🎯 FunctionRegistry: ❌ Promise found, rejecting...")
+			promiseHandlers.reject(error)
+			this.returnPromises.delete(executionId)
+			console.log("🎯 FunctionRegistry: ❌ Promise rejected and cleaned up")
+		} else {
+			console.log("🎯 FunctionRegistry: 🟡 No promise found for execution, error not propagated")
+		}
+	}
+
+	cleanupReturnPromise(executionId: string): void {
+		console.log("🎯 FunctionRegistry: 🗑️  Cleaning up return promise for execution:", executionId)
+		this.returnPromises.delete(executionId)
 	}
 }
 
