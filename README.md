@@ -1,8 +1,6 @@
-# `n8n` Functions
+# 🧠 n8n-nodes-function
 
 <img alt="Workflow using functions" src="screenshots/workflow-with-function.png" width="600" />
-
-# 🧠 n8n-nodes-function
 
 Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal Engine 5.
 
