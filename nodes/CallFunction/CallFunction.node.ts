@@ -455,12 +455,29 @@ export class CallFunction implements INodeType {
 				console.log("🔧 CallFunction: Using execution ID for return value:", actualExecutionId)
 
 				// Check if function returned a value via ReturnFromFunction node
+				console.log("🔧 CallFunction: About to check for return value...")
+				console.log("🔧 CallFunction: Looking for return value under execution ID:", actualExecutionId)
+
 				const returnValue = registry.getFunctionReturnValue(actualExecutionId)
-				console.log("🔧 CallFunction: Function return value =", returnValue)
+				console.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+				console.log("🔧 CallFunction: Return value type:", typeof returnValue)
+				console.log("🔧 CallFunction: Return value === null?", returnValue === null)
+				console.log("🔧 CallFunction: Return value === undefined?", returnValue === undefined)
+
+				// If no return value and storeResponse is enabled, this is potentially an issue
+				if (storeResponse && returnValue === null) {
+					console.warn("🔧 CallFunction: ⚠️  storeResponse is enabled but no return value found!")
+					console.warn("🔧 CallFunction: ⚠️  This suggests either:")
+					console.warn("🔧 CallFunction: ⚠️    1. No ReturnFromFunction node is connected to the function")
+					console.warn("🔧 CallFunction: ⚠️    2. ReturnFromFunction failed to execute")
+					console.warn("🔧 CallFunction: ⚠️    3. There's a timing issue with return value storage")
+				}
 
 				// Clear the return value from registry after retrieving it
 				if (returnValue !== null) {
+					console.log("🔧 CallFunction: Clearing return value from registry...")
 					registry.clearFunctionReturnValue(actualExecutionId)
+					console.log("🔧 CallFunction: Return value cleared")
 				}
 
 				// Start with the original item

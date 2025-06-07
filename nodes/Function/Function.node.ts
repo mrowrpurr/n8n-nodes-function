@@ -318,31 +318,74 @@ export class Function implements INodeType {
 			console.log("🎯 Function: Final output item =", outputItem)
 
 			// Emit the data to trigger downstream nodes (including potential ReturnFromFunction)
-			this.emit([this.helpers.returnJsonArray([outputItem])])
+			console.log("🎯 Function: About to emit data to downstream nodes")
+			console.log("🎯 Function: Current execution ID we're using:", currentExecutionId)
+			console.log("🎯 Function: Output item being emitted:", outputItem)
 
-			// Wait for ReturnFromFunction to store the return value (with timeout)
-			console.log("🎯 Function: Waiting for return value to be stored...")
+			this.emit([this.helpers.returnJsonArray([outputItem])])
+			console.log("🎯 Function: Data emitted successfully")
+
+			// For void functions (no downstream ReturnFromFunction), we should not wait
+			// We'll wait a short time to see if a ReturnFromFunction executes, but not the full timeout
+			console.log("🎯 Function: Checking if this is a void function...")
+
 			let returnValue = null
 			let waitTime = 0
-			const maxWaitTime = 5000 // 5 seconds timeout
+			const shortWaitTime = 200 // Wait 200ms to see if ReturnFromFunction starts
+			const maxWaitTime = 5000 // Full timeout if ReturnFromFunction is detected
 			const pollInterval = 50 // Check every 50ms
+			let pollAttempts = 0
+			let returnFromFunctionDetected = false
 
-			while (waitTime < maxWaitTime) {
+			// Short initial wait to detect if ReturnFromFunction will run
+			while (waitTime < shortWaitTime) {
 				await new Promise((resolve) => setTimeout(resolve, pollInterval))
 				waitTime += pollInterval
+				pollAttempts++
 
 				returnValue = registry.getFunctionReturnValue(currentExecutionId)
+
 				if (returnValue !== null) {
-					console.log("🎯 Function: Return value found:", returnValue)
+					console.log("🎯 Function: ✅ Return value found quickly after", waitTime, "ms:", returnValue)
+					returnFromFunctionDetected = true
 					break
 				}
 			}
 
-			if (waitTime >= maxWaitTime) {
-				console.log("🎯 Function: Timeout waiting for return value")
+			// If no return value found in the short wait, this is likely a void function
+			if (!returnFromFunctionDetected) {
+				console.log("🎯 Function: 🟡 No return value detected in", shortWaitTime, "ms")
+				console.log("🎯 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
+				console.log("🎯 Function: 🟡 Completing immediately without waiting for return value")
+			} else {
+				// Continue waiting up to full timeout since ReturnFromFunction was detected
+				console.log("🎯 Function: 🟢 ReturnFromFunction detected, continuing to wait...")
+
+				while (waitTime < maxWaitTime && returnValue === null) {
+					await new Promise((resolve) => setTimeout(resolve, pollInterval))
+					waitTime += pollInterval
+					pollAttempts++
+
+					returnValue = registry.getFunctionReturnValue(currentExecutionId)
+
+					// Only log every 20 attempts to reduce spam
+					if (pollAttempts % 20 === 0) {
+						console.log(`🎯 Function: Poll attempt ${pollAttempts} (${waitTime}ms): checking for return value`)
+					}
+
+					if (returnValue !== null) {
+						console.log("🎯 Function: ✅ Return value found after", waitTime, "ms:", returnValue)
+						break
+					}
+				}
+
+				if (waitTime >= maxWaitTime && returnValue === null) {
+					console.log("🎯 Function: ⏰ TIMEOUT waiting for return value after", maxWaitTime, "ms")
+					console.log("🎯 Function: ⏰ ReturnFromFunction was detected but failed to store return value")
+				}
 			}
 
-			console.log("🎯 Function: Function execution completed, checking for return value")
+			console.log("🎯 Function: Function execution completed, final return value:", returnValue)
 
 			// Note: Stack will be popped by ReturnFromFunction node when return value is stored
 

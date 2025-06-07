@@ -32,15 +32,23 @@ export class ReturnFromFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🎯 ReturnFromFunction: Starting execution")
+		console.log("🔴 ReturnFromFunction: ===== STARTING EXECUTION =====")
+		console.log("🔴 ReturnFromFunction: Node execution started at:", new Date().toISOString())
+
 		const items = this.getInputData()
+		console.log("🔴 ReturnFromFunction: Input items count:", items.length)
+		console.log("🔴 ReturnFromFunction: Input items:", items)
+
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			console.log(`🔴 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)
+
 			const returnCode = this.getNodeParameter("returnCode", itemIndex) as string
 			const item = items[itemIndex]
 
-			console.log("🎯 ReturnFromFunction: Return code =", returnCode)
+			console.log("🔴 ReturnFromFunction: Return code =", returnCode)
+			console.log("🔴 ReturnFromFunction: Processing item =", item)
 
 			// Execute the JavaScript code to get the return value
 			let parsedReturnValue: any
@@ -85,27 +93,42 @@ export class ReturnFromFunction implements INodeType {
 				}
 			}
 
-			console.log("🎯 ReturnFromFunction: Final return value =", parsedReturnValue)
+			console.log("🔴 ReturnFromFunction: Final return value =", parsedReturnValue)
 
 			// Get execution ID from the registry (set by the Function node)
 			const registry = FunctionRegistry.getInstance()
+			console.log("🔴 ReturnFromFunction: Getting current function execution from registry...")
+
 			const functionExecutionId = registry.getCurrentFunctionExecution()
-			console.log("🎯 ReturnFromFunction: Function execution ID from registry:", functionExecutionId)
+			console.log("🔴 ReturnFromFunction: Function execution ID from registry:", functionExecutionId)
+			console.log("🔴 ReturnFromFunction: Raw execution ID from this context:", this.getExecutionId())
 
 			if (!functionExecutionId) {
-				console.warn("🎯 ReturnFromFunction: No current function execution found - this ReturnFromFunction may not be connected to a Function node")
+				console.warn("🔴 ReturnFromFunction: ⚠️  NO CURRENT FUNCTION EXECUTION FOUND!")
+				console.warn("🔴 ReturnFromFunction: ⚠️  This suggests the ReturnFromFunction is not properly connected to a Function node")
+				console.warn("🔴 ReturnFromFunction: ⚠️  Or the Function node didn't push its execution ID to the stack")
 			}
 
 			const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
-			console.log("🎯 ReturnFromFunction: Setting function return value for execution:", effectiveExecutionId)
+			console.log("🔴 ReturnFromFunction: Effective execution ID for storing return value:", effectiveExecutionId)
+			console.log("🔴 ReturnFromFunction: About to store return value:", parsedReturnValue)
 
 			// Store the return value in the registry so the Function node can pick it up
+			console.log("🔴 ReturnFromFunction: Calling registry.setFunctionReturnValue...")
 			registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
+			console.log("🔴 ReturnFromFunction: ✅ Return value stored successfully!")
+
+			// Verify the value was actually stored
+			const verifyValue = registry.getFunctionReturnValue(effectiveExecutionId)
+			console.log("🔴 ReturnFromFunction: Verification - stored value retrieval:", verifyValue)
 
 			// Pop the current function execution from the stack now that we've stored the return value
 			if (functionExecutionId) {
+				console.log("🔴 ReturnFromFunction: Popping function execution from stack...")
 				const poppedId = registry.popCurrentFunctionExecution()
-				console.log("🎯 ReturnFromFunction: Popped function execution from stack:", poppedId)
+				console.log("🔴 ReturnFromFunction: ✅ Popped function execution from stack:", poppedId)
+			} else {
+				console.log("🔴 ReturnFromFunction: ⚠️  No function execution ID to pop from stack")
 			}
 
 			// Pass through the item unchanged (no more internal fields to clean)
@@ -118,7 +141,9 @@ export class ReturnFromFunction implements INodeType {
 			returnData.push(resultItem)
 		}
 
-		console.log("🎯 ReturnFromFunction: Execution complete")
+		console.log("🔴 ReturnFromFunction: ===== EXECUTION COMPLETE =====")
+		console.log("🔴 ReturnFromFunction: Final return data:", returnData)
+		console.log("🔴 ReturnFromFunction: Node execution completed at:", new Date().toISOString())
 		return [returnData]
 	}
 }

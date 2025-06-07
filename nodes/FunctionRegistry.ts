@@ -153,19 +153,45 @@ class FunctionRegistry {
 	}
 
 	setFunctionReturnValue(executionId: string, returnValue: any): void {
-		console.log("🎯 FunctionRegistry: Setting return value for execution:", executionId, "value:", returnValue)
+		console.log("🎯 FunctionRegistry: ⭐ SETTING return value for execution:", executionId)
+		console.log("🎯 FunctionRegistry: ⭐ Return value being stored:", returnValue)
+		console.log("🎯 FunctionRegistry: ⭐ Return value type:", typeof returnValue)
+		console.log("🎯 FunctionRegistry: ⭐ Registry size before:", this.returnValues.size)
+
 		this.returnValues.set(executionId, returnValue)
+
+		console.log("🎯 FunctionRegistry: ⭐ Registry size after:", this.returnValues.size)
+		console.log("🎯 FunctionRegistry: ⭐ Return value stored successfully!")
+
+		// Verify it was stored
+		const verification = this.returnValues.get(executionId)
+		console.log("🎯 FunctionRegistry: ⭐ Verification - can retrieve:", verification)
 	}
 
 	getFunctionReturnValue(executionId: string): any | null {
+		console.log("🎯 FunctionRegistry: 🔍 GETTING return value for execution:", executionId)
+		console.log("🎯 FunctionRegistry: 🔍 Registry size:", this.returnValues.size)
+		console.log("🎯 FunctionRegistry: 🔍 All keys in registry:", Array.from(this.returnValues.keys()))
+
 		const returnValue = this.returnValues.get(executionId)
-		console.log("🎯 FunctionRegistry: Getting return value for execution:", executionId, "value:", returnValue)
-		return returnValue || null
+		console.log("🎯 FunctionRegistry: 🔍 Raw value from map:", returnValue)
+		console.log("🎯 FunctionRegistry: 🔍 Value type:", typeof returnValue)
+		console.log("🎯 FunctionRegistry: 🔍 Value === undefined?", returnValue === undefined)
+
+		const result = returnValue || null
+		console.log("🎯 FunctionRegistry: 🔍 Final result (with null fallback):", result)
+		return result
 	}
 
 	clearFunctionReturnValue(executionId: string): void {
-		console.log("🎯 FunctionRegistry: Clearing return value for execution:", executionId)
+		console.log("🎯 FunctionRegistry: 🗑️  CLEARING return value for execution:", executionId)
+		console.log("🎯 FunctionRegistry: 🗑️  Registry size before:", this.returnValues.size)
+
+		const existed = this.returnValues.has(executionId)
 		this.returnValues.delete(executionId)
+
+		console.log("🎯 FunctionRegistry: 🗑️  Value existed?", existed)
+		console.log("🎯 FunctionRegistry: 🗑️  Registry size after:", this.returnValues.size)
 	}
 
 	pushCurrentFunctionExecution(executionId: string): void {
@@ -203,6 +229,14 @@ class FunctionRegistry {
 
 	getCurrentCallContext(): string | undefined {
 		return this.callContextStack[this.callContextStack.length - 1]
+	}
+
+	getAllReturnValues(): Map<string, any> {
+		console.log("🎯 FunctionRegistry: Getting all return values, total entries:", this.returnValues.size)
+		for (const [key, value] of this.returnValues.entries()) {
+			console.log("🎯 FunctionRegistry: Return value entry:", key, "=", value)
+		}
+		return new Map(this.returnValues)
 	}
 }
 
