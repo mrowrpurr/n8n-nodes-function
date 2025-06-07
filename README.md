@@ -1,7 +1,5 @@
 # `n8n` Functions
 
-> Custom nodes by [`@mrowrpurr`](https://github.com/mrowrpurr)
-
 <img alt="Workflow using functions" src="screenshots/workflow-with-function.png" width="600" />
 
 # 🧠 n8n-nodes-function
