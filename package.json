@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-function",
-	"version": "1.0.0",
-	"description": "Function and Call Function nodes for n8n - Blueprint-style local functions",
+	"version": "0.1.0",
+	"description": "Function nodes for n8n",
 	"keywords": [
 		"n8n-community-node-package"
 	],
