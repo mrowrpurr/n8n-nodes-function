@@ -448,13 +448,58 @@ export class CallFunction implements INodeType {
 
 				console.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
 
+				// Check if stream is ready before making the call
+				const groupName = `group:${functionName}`
+				console.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
+
+				const isReady = await registry.waitForStreamReady(streamKey, groupName, 2000) // 2 second timeout
+
+				if (!isReady) {
+					console.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
+					// Don't throw error immediately, try the call - it might work if function is just starting
+				} else {
+					console.log("🌊 CallFunction: Stream is ready, proceeding with call")
+				}
+
 				// Add call to stream
 				await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
 
 				console.log("🌊 CallFunction: Call added to stream, waiting for response...")
 
-				// Wait for response
-				const response = await registry.waitForResponse(responseChannel, 30) // 30 second timeout
+				// Wait for response with retry logic for the first call
+				let response
+				let retryCount = 0
+				const maxRetries = 2
+				let currentResponseChannel = responseChannel
+
+				while (retryCount <= maxRetries) {
+					try {
+						response = await registry.waitForResponse(currentResponseChannel, 15) // 15 second timeout per attempt
+						break // Success, exit retry loop
+					} catch (error) {
+						retryCount++
+						console.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
+
+						if (retryCount <= maxRetries) {
+							console.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
+							await new Promise((resolve) => setTimeout(resolve, 2000))
+
+							// Generate new call ID for retry
+							const retryCallId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+							const retryResponseChannel = `function:response:${retryCallId}`
+
+							console.log("🌊 CallFunction: Retry call ID:", retryCallId)
+
+							// Add retry call to stream
+							await registry.addCall(streamKey, retryCallId, functionName, functionParameters, item, retryResponseChannel, 30000)
+
+							// Update response channel for this attempt
+							currentResponseChannel = retryResponseChannel
+						} else {
+							throw error // Re-throw the last error if all retries failed
+						}
+					}
+				}
 
 				console.log("🌊 CallFunction: Received response:", response)
 

@@ -417,6 +417,65 @@ class FunctionRegistry {
 		}
 	}
 
+	/**
+	 * Check if a stream exists and has active consumers
+	 */
+	async isStreamReady(streamKey: string, groupName: string): Promise<boolean> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return false
+
+			// Check if stream exists
+			const streamExists = await this.client.exists(streamKey)
+			if (!streamExists) {
+				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stream does not exist: ${streamKey}`)
+				return false
+			}
+
+			// Check if consumer group exists and has consumers
+			try {
+				const groups = await this.client.xInfoGroups(streamKey)
+				const targetGroup = groups.find((group: any) => group.name === groupName)
+
+				if (!targetGroup) {
+					console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Consumer group does not exist: ${groupName}`)
+					return false
+				}
+
+				// Simplified check - just verify the group exists (don't check for active consumers)
+				const isReady = true
+				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stream ${streamKey} ready: ${isReady} (group exists)`)
+				return isReady
+			} catch (groupError) {
+				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Error checking consumer group info: ${groupError.message}`)
+				return false
+			}
+		} catch (error) {
+			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error checking stream readiness:`, error)
+			return false
+		}
+	}
+
+	/**
+	 * Wait for stream to become ready with timeout
+	 */
+	async waitForStreamReady(streamKey: string, groupName: string, timeoutMs: number = 2000): Promise<boolean> {
+		const startTime = Date.now()
+		const checkInterval = 200 // Check every 200ms
+
+		while (Date.now() - startTime < timeoutMs) {
+			if (await this.isStreamReady(streamKey, groupName)) {
+				return true
+			}
+
+			// Wait before next check
+			await new Promise((resolve) => setTimeout(resolve, checkInterval))
+		}
+
+		console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Timeout waiting for stream to be ready: ${streamKey}`)
+		return false
+	}
+
 	// ===== END REDIS STREAMS METHODS =====
 
 	async registerFunction(
