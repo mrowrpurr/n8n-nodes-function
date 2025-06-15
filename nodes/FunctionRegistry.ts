@@ -670,13 +670,14 @@ class FunctionRegistry {
 		}
 	}
 
-	async getAvailableFunctions(executionId?: string): Promise<Array<{ name: string; value: string }>> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Getting available functions`)
+	async getAvailableFunctions(scope?: string): Promise<Array<{ name: string; value: string }>> {
+		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Getting available functions for scope: ${scope || "all"}`)
 		const functionNames = new Set<string>()
 
 		// Get functions from memory (local process)
 		for (const listener of this.listeners.values()) {
-			if (executionId && listener.executionId !== executionId) {
+			// If scope is specified, filter by execution ID (scope)
+			if (scope && listener.executionId !== scope) {
 				continue
 			}
 			functionNames.add(listener.functionName)
@@ -686,14 +687,34 @@ class FunctionRegistry {
 		try {
 			await this.ensureRedisConnection()
 			if (this.client) {
-				const functionKeys = await this.client.keys("function:*")
+				const functionKeys = await this.client.keys("function:meta:*")
+				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found ${functionKeys.length} function metadata keys`)
+
 				for (const key of functionKeys) {
 					if (key.startsWith("function:meta:")) {
 						// Extract function name from metadata key: function:meta:workerId:functionName
 						const parts = key.split(":")
 						if (parts.length >= 4) {
 							const functionName = parts.slice(3).join(":")
-							functionNames.add(functionName)
+
+							// If scope is specified, check if this function belongs to that scope
+							if (scope) {
+								// Get the metadata to check the execution ID (scope)
+								try {
+									const metadata = await this.client.hGetAll(key)
+									console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Checking function ${functionName}, metadata executionId: ${metadata.executionId}, looking for scope: ${scope}`)
+									if (metadata && metadata.executionId === scope) {
+										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Function ${functionName} matches scope ${scope}`)
+										functionNames.add(functionName)
+									} else {
+										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Function ${functionName} does not match scope ${scope}`)
+									}
+								} catch (metaError) {
+									console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error reading metadata for ${key}:`, metaError)
+								}
+							} else {
+								functionNames.add(functionName)
+							}
 						}
 					}
 				}
@@ -702,7 +723,7 @@ class FunctionRegistry {
 			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting functions from Redis:`, error)
 		}
 
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found functions:`, Array.from(functionNames))
+		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found functions for scope '${scope || "all"}':`, Array.from(functionNames))
 		return Array.from(functionNames).map((name) => ({
 			name,
 			value: name,

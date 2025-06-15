@@ -176,18 +176,48 @@ export class CallFunction implements INodeType {
 				let availableFunctions
 
 				if (globalFunction) {
-					// Only show global functions
+					// Only show global functions (scope = "__global__")
 					availableFunctions = await registry.getAvailableFunctions("__global__")
+
+					// If no global functions found, add a helpful message
+					if (availableFunctions.length === 0) {
+						return [
+							{
+								name: "⚠️ No Global Functions Available",
+								value: "__no_global_functions__",
+								description: "No global functions found. Create and activate a workflow with a global Function node.",
+							},
+						]
+					}
 				} else {
-					// Show local functions (current workflow scope)
-					const workflowId = this.getWorkflow().id || "unknown"
-					availableFunctions = await registry.getAvailableFunctions(workflowId)
+					// Show local functions - get all functions and filter out globals
+					console.log("🔧 CallFunction: Getting all functions and filtering out global ones")
+					const allFunctions = await registry.getAvailableFunctions() // Get all functions without scope filter
+
+					// Filter to only show non-global functions
+					const localFunctions = []
+					for (const func of allFunctions) {
+						// Check if this function is NOT global by checking if it exists in global scope
+						try {
+							const globalParams = await registry.getFunctionParameters(func.value, "__global__")
+							// If we can't get parameters with global scope, it's a local function
+							if (globalParams.length === 0) {
+								localFunctions.push(func)
+							}
+						} catch (error) {
+							// If there's an error getting global params, assume it's local
+							localFunctions.push(func)
+						}
+					}
+
+					console.log("🔧 CallFunction: Found local functions:", localFunctions)
+					availableFunctions = localFunctions
 
 					// If no local functions found, add a helpful message
 					if (availableFunctions.length === 0) {
 						return [
 							{
-								name: "⚠️ No Functions Available",
+								name: "⚠️ No Local Functions Available",
 								value: "__no_local_functions__",
 								description: "No local functions found. Activate the workflow to register Function nodes and refresh this list.",
 							},
@@ -212,7 +242,7 @@ export class CallFunction implements INodeType {
 				console.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
 				console.log("🔧 CallFunction: Global function mode:", globalFunction)
 
-				if (!functionName) {
+				if (!functionName || functionName === "__no_local_functions__" || functionName === "__no_global_functions__" || functionName === "__activate_workflow__") {
 					return []
 				}
 
@@ -222,7 +252,27 @@ export class CallFunction implements INodeType {
 				if (globalFunction) {
 					parameters = await registry.getFunctionParameters(functionName, "__global__")
 				} else {
-					const workflowId = this.getWorkflow().id || "unknown"
+					// Try multiple ways to get the workflow ID
+					let workflowId = "unknown"
+					try {
+						workflowId = this.getWorkflow().id || "unknown"
+					} catch (error) {
+						console.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
+					}
+
+					// If still unknown, try to get from static data
+					if (workflowId === "unknown") {
+						try {
+							const staticData = this.getWorkflowStaticData("global")
+							if (staticData && staticData.workflowId) {
+								workflowId = String(staticData.workflowId)
+							}
+						} catch (error) {
+							console.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
+						}
+					}
+
+					console.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
 					parameters = await registry.getFunctionParameters(functionName, workflowId)
 				}
 
@@ -529,9 +579,21 @@ export class CallFunction implements INodeType {
 				// Start with the original item
 				let resultJson: any = { ...item.json }
 
-				// Store the response if requested
-				if (storeResponse && response.data !== null && responseVariableName && responseVariableName.trim()) {
-					resultJson[responseVariableName] = response.data
+				// Always include the function result, but how it's stored depends on storeResponse setting
+				if (response.data !== null) {
+					if (storeResponse && responseVariableName && responseVariableName.trim()) {
+						// Store under specific variable name
+						resultJson[responseVariableName] = response.data
+					} else {
+						// Default behavior: merge the function result directly into the item
+						if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
+							// If result is an object, merge its properties
+							resultJson = { ...resultJson, ...response.data }
+						} else {
+							// If result is not an object, store under 'result' key
+							resultJson.result = response.data
+						}
+					}
 				}
 
 				const resultItem: INodeExecutionData = {
