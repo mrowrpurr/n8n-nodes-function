@@ -3,8 +3,8 @@
 # 🧠 n8n-nodes-function <!-- omit from toc -->
 
 - [📦 Features](#-features)
-- [ℹ️ Notes](#ℹ️-notes)
 - [🛠️ Installation](#️-installation)
+- [ℹ️ Notes](#ℹ️-notes)
 - [🔎 Similarities to n8n's `Execute Workflow`](#-similarities-to-n8ns-execute-workflow)
   - [⚡ `Function` trigger (_similar to `When Executed by Another Workflow`_)](#-function-trigger-similar-to-when-executed-by-another-workflow)
   - [➡️ `Call Function` (_similar to `Execute Workflow`_)](#️-call-function-similar-to-execute-workflow)
@@ -24,6 +24,10 @@ Define reusable logic blocks with `Function`, call them with `Call Function`, an
 - 🧬 **Nested function calls** - functions can call other functions with isolated return values
 - 🌍 **Global functions** - share logic across workflows
 
+## 🛠️ Installation
+
+<img src="screenshots/install-node.png" alt="Install n8n-nodes-function" width="500" />
+
 ## ℹ️ Notes
 
 > 👋 Hey `n8n` team devs, feel free to take these ideas and build this into `n8n` 😉 `<3`
@@ -40,10 +44,6 @@ Define reusable logic blocks with `Function`, call them with `Call Function`, an
   
 - Both standard and [queue mode](https://docs.n8n.io/hosting/scaling/queue-mode/) are supported
   > _In queue mode, Redis streaming is used._
-
-## 🛠️ Installation
-
-<img src="screenshots/install-node.png" alt="Install n8n-nodes-function" width="350" />
 
 ## 🔎 Similarities to n8n's `Execute Workflow`
 
