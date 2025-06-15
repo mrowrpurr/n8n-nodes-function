@@ -1,5 +1,5 @@
 import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
-import { enableRedisMode, setQueueMode, setUseSimplifiedRegistry } from "../FunctionRegistryFactory"
+import { enableRedisMode, setQueueMode, setUseSimplifiedRegistry, setUseWorkflowRegistry } from "../FunctionRegistryFactory"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
 
 export class ConfigureFunctions implements INodeType {
@@ -45,11 +45,28 @@ export class ConfigureFunctions implements INodeType {
 				},
 			},
 			{
-				displayName: "Use Simplified Registry",
-				name: "useSimplifiedRegistry",
-				type: "boolean",
-				default: false,
-				description: "Whether to use the simplified Redis registry (experimental - cleaner logic, same isolation)",
+				displayName: "Registry Type",
+				name: "registryType",
+				type: "options",
+				options: [
+					{
+						name: "Workflow Registry (Most Stable)",
+						value: "workflow",
+						description: "Stores function workflow fragments in Redis - works across all n8n modes",
+					},
+					{
+						name: "Simplified Registry",
+						value: "simplified",
+						description: "Simplified Redis registry with metadata only",
+					},
+					{
+						name: "Full Redis Registry",
+						value: "redis",
+						description: "Original Redis registry with complex execution tracking",
+					},
+				],
+				default: "workflow",
+				description: "Choose the function registry implementation",
 				displayOptions: {
 					show: {
 						useRedis: [true],
@@ -66,12 +83,18 @@ export class ConfigureFunctions implements INodeType {
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
-		const useSimplifiedRegistry = this.getNodeParameter("useSimplifiedRegistry", false) as boolean
+		const registryType = this.getNodeParameter("registryType", "workflow") as string
+
+		// Convert registry type to boolean flags for backward compatibility
+		const useSimplifiedRegistry = registryType === "simplified"
+		const useWorkflowRegistry = registryType === "workflow"
 
 		console.log("⚙️ ConfigureFunctions: Parameters retrieved:")
 		console.log("⚙️ ConfigureFunctions: - Use Redis =", useRedis)
 		console.log("⚙️ ConfigureFunctions: - Test connection =", testConnection)
+		console.log("⚙️ ConfigureFunctions: - Registry type =", registryType)
 		console.log("⚙️ ConfigureFunctions: - Use simplified registry =", useSimplifiedRegistry)
+		console.log("⚙️ ConfigureFunctions: - Use workflow registry =", useWorkflowRegistry)
 
 		// For now, just use the user setting - we can add auto-detection later
 		const shouldUseRedis = useRedis
@@ -114,9 +137,12 @@ export class ConfigureFunctions implements INodeType {
 			enableRedisMode(redisConfig.host, useSimplifiedRegistry)
 			console.log("⚙️ ConfigureFunctions: ✅ enableRedisMode() called successfully")
 
-			// Also set the simplified registry flag directly
+			// Set registry type flags
 			setUseSimplifiedRegistry(useSimplifiedRegistry)
 			console.log("⚙️ ConfigureFunctions: ✅ setUseSimplifiedRegistry() called successfully")
+
+			setUseWorkflowRegistry(useWorkflowRegistry)
+			console.log("⚙️ ConfigureFunctions: ✅ setUseWorkflowRegistry() called successfully")
 
 			console.log("⚙️ ConfigureFunctions: 🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
 
@@ -124,7 +150,13 @@ export class ConfigureFunctions implements INodeType {
 			if (testConnection) {
 				console.log("⚙️ ConfigureFunctions: Testing Redis connection...")
 				try {
-					if (useSimplifiedRegistry) {
+					if (useWorkflowRegistry) {
+						// Import and test workflow Redis connection
+						const { FunctionRegistryWorkflow } = await import("../FunctionRegistryWorkflow")
+						const workflowRegistry = FunctionRegistryWorkflow.getInstance()
+						workflowRegistry.setRedisConfig(redisConfig.host, redisConfig.port)
+						console.log("⚙️ ConfigureFunctions: Workflow Redis configuration set successfully")
+					} else if (useSimplifiedRegistry) {
 						// Import and test simplified Redis connection
 						const { FunctionRegistrySimplified } = await import("../FunctionRegistrySimplified")
 						const simplifiedRegistry = FunctionRegistrySimplified.getInstance()
@@ -145,7 +177,9 @@ export class ConfigureFunctions implements INodeType {
 								mode: "redis",
 								redisHost: redisConfig.host,
 								redisPort: redisConfig.port,
+								registryType,
 								useSimplifiedRegistry,
+								useWorkflowRegistry,
 								status: "configured",
 								timestamp: new Date().toISOString(),
 							},
@@ -161,7 +195,9 @@ export class ConfigureFunctions implements INodeType {
 								mode: "redis",
 								redisHost: redisConfig.host,
 								redisPort: redisConfig.port,
+								registryType,
 								useSimplifiedRegistry,
+								useWorkflowRegistry,
 								status: "error",
 								error: error.message,
 								timestamp: new Date().toISOString(),
@@ -177,7 +213,9 @@ export class ConfigureFunctions implements INodeType {
 							mode: "redis",
 							redisHost: redisConfig.host,
 							redisPort: redisConfig.port,
+							registryType,
 							useSimplifiedRegistry,
+							useWorkflowRegistry,
 							status: "configured",
 							timestamp: new Date().toISOString(),
 						},

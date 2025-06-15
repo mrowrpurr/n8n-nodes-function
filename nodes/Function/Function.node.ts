@@ -383,7 +383,13 @@ export class Function implements INodeType {
 		}))
 
 		// Register the function with the registry
-		registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)
+		if (registry.constructor.name === "FunctionRegistryWorkflow") {
+			// For workflow registry, pass additional parameters
+			;(registry as any).registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback, undefined, undefined, enableCode, code)
+		} else {
+			// For other registries, use the standard signature
+			registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)
+		}
 
 		// Define cleanup function
 		const closeFunction = async () => {

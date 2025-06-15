@@ -1,6 +1,7 @@
 import { FunctionRegistry } from "./FunctionRegistry"
 import { FunctionRegistryRedis } from "./FunctionRegistryRedis"
 import { FunctionRegistrySimplified } from "./FunctionRegistrySimplified"
+import { FunctionRegistryWorkflow } from "./FunctionRegistryWorkflow"
 import { createClient } from "redis"
 
 // Global configuration that persists across the entire n8n process
@@ -11,6 +12,7 @@ declare global {
 				redisHost?: string
 				queueMode?: boolean
 				useSimplified?: boolean
+				useWorkflow?: boolean
 		  }
 		| undefined
 }
@@ -56,6 +58,7 @@ async function loadGlobalConfigFromRedis(): Promise<void> {
 			redisHostOverride = config.redisHost || redisHostOverride
 			queueModeEnabled = config.queueMode || queueModeEnabled
 			useSimplifiedRegistry = config.useSimplified || useSimplifiedRegistry
+			useWorkflowRegistry = config.useWorkflow !== undefined ? config.useWorkflow : true
 
 			console.log("🏭 FunctionRegistryFactory: 🔄 Updated local config from Redis - Redis:", redisHostOverride, "Queue:", queueModeEnabled, "Simplified:", useSimplifiedRegistry)
 		} else {
@@ -101,8 +104,18 @@ configLoadPromise = loadGlobalConfigFromRedis()
 let redisHostOverride: string | null = globalThis.__n8nFunctionsGlobalConfig.redisHost || null
 let queueModeEnabled: boolean = globalThis.__n8nFunctionsGlobalConfig.queueMode || false
 let useSimplifiedRegistry: boolean = globalThis.__n8nFunctionsGlobalConfig.useSimplified || false
+let useWorkflowRegistry: boolean = globalThis.__n8nFunctionsGlobalConfig.useWorkflow !== undefined ? globalThis.__n8nFunctionsGlobalConfig.useWorkflow : true // Default to true for maximum stability
 
-console.log("🏭 FunctionRegistryFactory: Initialized with global config - Redis:", redisHostOverride, "Queue:", queueModeEnabled, "Simplified:", useSimplifiedRegistry)
+console.log(
+	"🏭 FunctionRegistryFactory: Initialized with global config - Redis:",
+	redisHostOverride,
+	"Queue:",
+	queueModeEnabled,
+	"Simplified:",
+	useSimplifiedRegistry,
+	"Workflow:",
+	useWorkflowRegistry
+)
 
 export function setRedisHost(host: string): void {
 	console.log("🏭 FunctionRegistryFactory: Setting Redis host override:", host)
@@ -150,6 +163,20 @@ export function setUseSimplifiedRegistry(enabled: boolean): void {
 	saveGlobalConfigToRedis().catch((err) => console.log("🏭 FunctionRegistryFactory: ⚠️ Failed to save config to Redis:", err.message))
 }
 
+export function setUseWorkflowRegistry(enabled: boolean): void {
+	console.log("🏭 FunctionRegistryFactory: Setting use workflow registry:", enabled)
+	useWorkflowRegistry = enabled
+
+	// Persist to global config
+	if (globalThis.__n8nFunctionsGlobalConfig) {
+		globalThis.__n8nFunctionsGlobalConfig.useWorkflow = enabled
+	}
+	console.log("🏭 FunctionRegistryFactory: ✅ Workflow registry setting saved globally - will affect ALL workflows")
+
+	// Save to Redis for cross-process persistence
+	saveGlobalConfigToRedis().catch((err) => console.log("🏭 FunctionRegistryFactory: ⚠️ Failed to save config to Redis:", err.message))
+}
+
 export function getRedisHost(): string {
 	return redisHostOverride || "redis"
 }
@@ -162,10 +189,15 @@ export function isUsingSimplifiedRegistry(): boolean {
 	return useSimplifiedRegistry
 }
 
-export function getFunctionRegistry(): FunctionRegistry | FunctionRegistryRedis | FunctionRegistrySimplified {
+export function isUsingWorkflowRegistry(): boolean {
+	return useWorkflowRegistry
+}
+
+export function getFunctionRegistry(): FunctionRegistry | FunctionRegistryRedis | FunctionRegistrySimplified | FunctionRegistryWorkflow {
 	console.log("🏭 FunctionRegistryFactory: ===== REGISTRY SELECTION DEBUG =====")
 	console.log("🏭 FunctionRegistryFactory: Explicit queue mode enabled =", queueModeEnabled)
 	console.log("🏭 FunctionRegistryFactory: Use simplified registry =", useSimplifiedRegistry)
+	console.log("🏭 FunctionRegistryFactory: Use workflow registry =", useWorkflowRegistry)
 	console.log("🏭 FunctionRegistryFactory: Redis host override =", redisHostOverride)
 	console.log("🏭 FunctionRegistryFactory: Global config =", globalThis.__n8nFunctionsGlobalConfig)
 
@@ -177,7 +209,17 @@ export function getFunctionRegistry(): FunctionRegistry | FunctionRegistryRedis 
 	console.log("🏭 FunctionRegistryFactory: Effective queue mode =", effectiveQueueMode)
 
 	if (effectiveQueueMode) {
-		if (useSimplifiedRegistry) {
+		if (useWorkflowRegistry) {
+			console.log("🏭 FunctionRegistryFactory: ✅ Using Workflow-based FunctionRegistry (MOST STABLE)")
+			const workflowRegistry = FunctionRegistryWorkflow.getInstance()
+
+			// Apply Redis host override if set, otherwise use default
+			const effectiveHost = redisHostOverride || "redis"
+			console.log("🏭 FunctionRegistryFactory: Setting Redis host to:", effectiveHost)
+			workflowRegistry.setRedisConfig(effectiveHost)
+
+			return workflowRegistry
+		} else if (useSimplifiedRegistry) {
 			console.log("🏭 FunctionRegistryFactory: ✅ Using Simplified Redis-backed FunctionRegistry")
 			const simplifiedRegistry = FunctionRegistrySimplified.getInstance()
 
@@ -206,7 +248,7 @@ export function getFunctionRegistry(): FunctionRegistry | FunctionRegistryRedis 
 }
 
 // Async version that waits for config to load from Redis
-export async function getFunctionRegistryAsync(): Promise<FunctionRegistry | FunctionRegistryRedis | FunctionRegistrySimplified> {
+export async function getFunctionRegistryAsync(): Promise<FunctionRegistry | FunctionRegistryRedis | FunctionRegistrySimplified | FunctionRegistryWorkflow> {
 	// Wait for config to load from Redis if it's still loading
 	if (configLoadPromise) {
 		console.log("🏭 FunctionRegistryFactory: ⏳ Waiting for global config to load from Redis...")
