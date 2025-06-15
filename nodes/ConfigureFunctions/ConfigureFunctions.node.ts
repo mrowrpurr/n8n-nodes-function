@@ -1,5 +1,6 @@
 import { type INodeExecutionData, NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
 import { enableRedisMode, setRedisHost, setQueueMode, setUseSimplifiedRegistry } from "../FunctionRegistryFactory"
+import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
 
 export class ConfigureFunctions implements INodeType {
 	description: INodeTypeDescription = {
@@ -17,50 +18,24 @@ export class ConfigureFunctions implements INodeType {
 		},
 		inputs: [],
 		outputs: [NodeConnectionType.Main],
+		credentials: [
+			{
+				name: FUNCTIONS_REDIS_INFO.credentialsName,
+				required: false,
+				displayOptions: {
+					show: {
+						useRedis: [true],
+					},
+				},
+			},
+		],
 		properties: [
 			{
-				displayName: "Function Registry Mode",
-				name: "mode",
-				type: "options",
-				options: [
-					{
-						name: "In-Memory (Default)",
-						value: "memory",
-						description: "Use in-memory function registry (single process)",
-					},
-					{
-						name: "Redis (Queue Mode)",
-						value: "redis",
-						description: "Use Redis-backed function registry for queue mode",
-					},
-				],
-				default: "memory",
-				description: "Choose how functions are stored and shared",
-			},
-			{
-				displayName: "Redis Host",
-				name: "redisHost",
-				type: "string",
-				default: "redis",
-				description: "Redis server hostname or IP address",
-				placeholder: "redis",
-				displayOptions: {
-					show: {
-						mode: ["redis"],
-					},
-				},
-			},
-			{
-				displayName: "Redis Port",
-				name: "redisPort",
-				type: "number",
-				default: 6379,
-				description: "Redis server port",
-				displayOptions: {
-					show: {
-						mode: ["redis"],
-					},
-				},
+				displayName: "Use Redis",
+				name: "useRedis",
+				type: "boolean",
+				default: false,
+				description: "Whether to use Redis for function storage (enables queue mode support and cross-workflow sharing)",
 			},
 			{
 				displayName: "Test Connection",
@@ -70,7 +45,7 @@ export class ConfigureFunctions implements INodeType {
 				description: "Whether to test Redis connection when workflow is activated",
 				displayOptions: {
 					show: {
-						mode: ["redis"],
+						useRedis: [true],
 					},
 				},
 			},
@@ -82,7 +57,7 @@ export class ConfigureFunctions implements INodeType {
 				description: "Whether to use the simplified Redis registry (experimental - cleaner logic, same isolation)",
 				displayOptions: {
 					show: {
-						mode: ["redis"],
+						useRedis: [true],
 					},
 				},
 			},
@@ -93,22 +68,50 @@ export class ConfigureFunctions implements INodeType {
 		console.log("⚙️ ConfigureFunctions: Starting configuration")
 
 		// Get configuration parameters
-		const mode = this.getNodeParameter("mode") as string
-		const redisHost = this.getNodeParameter("redisHost", "redis") as string
-		const redisPort = this.getNodeParameter("redisPort", 6379) as number
+		const useRedis = this.getNodeParameter("useRedis") as boolean
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
 		const useSimplifiedRegistry = this.getNodeParameter("useSimplifiedRegistry", false) as boolean
 
-		console.log("⚙️ ConfigureFunctions: Mode =", mode)
-		console.log("⚙️ ConfigureFunctions: Redis host =", redisHost)
-		console.log("⚙️ ConfigureFunctions: Redis port =", redisPort)
+		console.log("⚙️ ConfigureFunctions: Use Redis =", useRedis)
 		console.log("⚙️ ConfigureFunctions: Test connection =", testConnection)
 		console.log("⚙️ ConfigureFunctions: Use simplified registry =", useSimplifiedRegistry)
 
-		// Configure the function registry based on mode
-		if (mode === "redis") {
+		// For now, just use the user setting - we can add auto-detection later
+		const shouldUseRedis = useRedis
+		console.log("⚙️ ConfigureFunctions: Should use Redis =", shouldUseRedis)
+
+		// Configure the function registry based on Redis setting
+		if (shouldUseRedis) {
 			console.log("⚙️ ConfigureFunctions: Enabling Redis mode")
-			enableRedisMode(redisHost, useSimplifiedRegistry)
+
+			// Get Redis credentials if provided
+			let redisConfig = {
+				host: "redis",
+				port: 6379,
+				database: 0,
+				user: "",
+				password: "",
+				ssl: false,
+			}
+
+			if (useRedis) {
+				try {
+					const credentials = (await this.getCredentials(FUNCTIONS_REDIS_INFO.credentialsName)) as unknown as FunctionsRedisCredentialsData
+					redisConfig = {
+						host: credentials.host || "redis",
+						port: credentials.port || 6379,
+						database: credentials.database || 0,
+						user: credentials.user || "",
+						password: credentials.password || "",
+						ssl: credentials.ssl || false,
+					}
+					console.log("⚙️ ConfigureFunctions: Using Redis credentials - host:", redisConfig.host, "port:", redisConfig.port)
+				} catch (error) {
+					console.warn("⚙️ ConfigureFunctions: No Redis credentials provided, using defaults:", error.message)
+				}
+			}
+
+			enableRedisMode(redisConfig.host, useSimplifiedRegistry)
 
 			// Also set the simplified registry flag directly
 			setUseSimplifiedRegistry(useSimplifiedRegistry)
@@ -121,13 +124,13 @@ export class ConfigureFunctions implements INodeType {
 						// Import and test simplified Redis connection
 						const { FunctionRegistrySimplified } = await import("../FunctionRegistrySimplified")
 						const simplifiedRegistry = FunctionRegistrySimplified.getInstance()
-						simplifiedRegistry.setRedisConfig(redisHost, redisPort)
+						simplifiedRegistry.setRedisConfig(redisConfig.host, redisConfig.port)
 						console.log("⚙️ ConfigureFunctions: Simplified Redis configuration set successfully")
 					} else {
 						// Import and test Redis connection
 						const { FunctionRegistryRedis } = await import("../FunctionRegistryRedis")
 						const redisRegistry = FunctionRegistryRedis.getInstance()
-						redisRegistry.setRedisConfig(redisHost, redisPort)
+						redisRegistry.setRedisConfig(redisConfig.host, redisConfig.port)
 						console.log("⚙️ ConfigureFunctions: Redis configuration set successfully")
 					}
 
@@ -136,8 +139,8 @@ export class ConfigureFunctions implements INodeType {
 						this.helpers.returnJsonArray([
 							{
 								mode: "redis",
-								redisHost,
-								redisPort,
+								redisHost: redisConfig.host,
+								redisPort: redisConfig.port,
 								useSimplifiedRegistry,
 								status: "configured",
 								timestamp: new Date().toISOString(),
@@ -152,8 +155,8 @@ export class ConfigureFunctions implements INodeType {
 						this.helpers.returnJsonArray([
 							{
 								mode: "redis",
-								redisHost,
-								redisPort,
+								redisHost: redisConfig.host,
+								redisPort: redisConfig.port,
 								useSimplifiedRegistry,
 								status: "error",
 								error: error.message,
@@ -168,8 +171,8 @@ export class ConfigureFunctions implements INodeType {
 					this.helpers.returnJsonArray([
 						{
 							mode: "redis",
-							redisHost,
-							redisPort,
+							redisHost: redisConfig.host,
+							redisPort: redisConfig.port,
 							useSimplifiedRegistry,
 							status: "configured",
 							timestamp: new Date().toISOString(),
