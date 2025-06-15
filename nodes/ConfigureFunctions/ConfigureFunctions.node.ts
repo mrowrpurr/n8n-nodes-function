@@ -1,5 +1,5 @@
-import { type INodeExecutionData, NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
-import { enableRedisMode, setRedisHost, setQueueMode } from "../FunctionRegistryFactory"
+import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
+import { enableRedisMode, setQueueMode } from "../FunctionRegistryFactory"
 
 export class ConfigureFunctions implements INodeType {
 	description: INodeTypeDescription = {
