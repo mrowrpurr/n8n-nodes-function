@@ -301,23 +301,42 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🔧 CallFunction: Starting execution")
+		const nodeId = this.getNode().id
+		const nodeName = this.getNode().name
+		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Starting execution`)
 		const items = this.getInputData()
-		console.log("🔧 CallFunction: Input items count =", items.length)
+		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Input items count =`, items.length)
+
+		// Debug: Log all node parameters
+		try {
+			const nodeParams = this.getNode().parameters
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Node parameters:`, JSON.stringify(nodeParams, null, 2))
+		} catch (error) {
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Could not get node parameters:`, error.message)
+		}
+
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			// Debug: Log node information
+			const nodeId = this.getNode().id
+			const nodeName = this.getNode().name
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Processing item ${itemIndex + 1}/${items.length}`)
+
 			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
 			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
 			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex, "") as string
 
-			console.log("🔧 CallFunction: Global function =", globalFunction)
-			console.log("🔧 CallFunction: Function name =", functionName)
-			console.log("🔧 CallFunction: Parameter mode =", parameterMode)
-			console.log("🔧 CallFunction: Store response =", storeResponse)
-			console.log("🔧 CallFunction: Response variable name =", responseVariableName)
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Global function =`, globalFunction)
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Function name =`, functionName)
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Parameter mode =`, parameterMode)
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Store response =`, storeResponse)
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Response variable name =`, responseVariableName)
+
+			// Debug: Log the raw parameter value
+			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Raw globalFunction parameter:`, typeof globalFunction, globalFunction)
 
 			if (!functionName || functionName === "__no_local_functions__" || functionName === "__activate_workflow__") {
 				throw new NodeOperationError(this.getNode(), "Please select a valid function. If no functions are available, activate the workflow first.")
