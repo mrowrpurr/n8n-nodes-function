@@ -521,7 +521,7 @@ export class CallFunction implements INodeType {
 				const groupName = `group:${functionName}`
 				console.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
 
-				const isReady = await registry.waitForStreamReady(streamKey, groupName, 2000) // 2 second timeout
+				const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
 
 				if (!isReady) {
 					console.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")

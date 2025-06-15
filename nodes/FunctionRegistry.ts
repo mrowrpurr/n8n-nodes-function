@@ -67,6 +67,8 @@ class FunctionRegistry {
 				url: `redis://${this.redisHost}:${this.redisPort}`,
 				socket: {
 					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+					connectTimeout: 100, // 100ms connect timeout
+					commandTimeout: 100, // 100ms command timeout
 				},
 			})
 
@@ -75,6 +77,8 @@ class FunctionRegistry {
 				url: `redis://${this.redisHost}:${this.redisPort}`,
 				socket: {
 					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+					connectTimeout: 100,
+					commandTimeout: 100,
 				},
 			})
 
@@ -83,6 +87,8 @@ class FunctionRegistry {
 				url: `redis://${this.redisHost}:${this.redisPort}`,
 				socket: {
 					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+					connectTimeout: 100,
+					commandTimeout: 100,
 				},
 			})
 
@@ -461,7 +467,7 @@ class FunctionRegistry {
 	 */
 	async waitForStreamReady(streamKey: string, groupName: string, timeoutMs: number = 2000): Promise<boolean> {
 		const startTime = Date.now()
-		const checkInterval = 200 // Check every 200ms
+		const checkInterval = 20 // Check every 20ms
 
 		while (Date.now() - startTime < timeoutMs) {
 			if (await this.isStreamReady(streamKey, groupName)) {
@@ -511,9 +517,16 @@ class FunctionRegistry {
 				workerId: WORKER_ID,
 			}
 
-			// Store function metadata as hash
+			// Store function metadata as hash and add to function set in parallel
 			const metadataKey = `function:meta:${WORKER_ID}:${functionName}`
-			await this.client.hSet(metadataKey, {
+			const functionSetKey = `function:${functionName}`
+
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Starting pipelined Redis operations at ${Date.now()}`)
+			const startTime = Date.now()
+
+			// Use Redis pipelining to batch all commands into a single round-trip
+			const pipeline = this.client.multi()
+			pipeline.hSet(metadataKey, {
 				functionName: metadata.functionName,
 				executionId: metadata.executionId,
 				nodeId: metadata.nodeId,
@@ -521,12 +534,14 @@ class FunctionRegistry {
 				workerId: metadata.workerId,
 				lastHeartbeat: Date.now().toString(),
 			})
-			await this.client.expire(metadataKey, 3600) // 1 hour expiry
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata stored: ${metadataKey}`)
+			pipeline.expire(metadataKey, 3600)
+			pipeline.sAdd(functionSetKey, WORKER_ID)
 
-			// Add this worker to the function's worker set
-			const functionSetKey = `function:${functionName}`
-			await this.client.sAdd(functionSetKey, WORKER_ID)
+			await pipeline.exec()
+
+			const endTime = Date.now()
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Pipelined Redis operations completed in ${endTime - startTime}ms`)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata stored: ${metadataKey}`)
 			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Added to function set: ${functionSetKey}`)
 		} catch (error) {
 			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Failed to register function in Redis:`, error)
@@ -546,14 +561,23 @@ class FunctionRegistry {
 			await this.ensureRedisConnection()
 			if (!this.client) throw new Error("Redis client not available")
 
-			// Remove metadata hash
+			// Remove metadata hash and function set in parallel
 			const metadataKey = `function:meta:${WORKER_ID}:${functionName}`
-			await this.client.del(metadataKey)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata removed: ${metadataKey}`)
-
-			// Remove from function set
 			const functionSetKey = `function:${functionName}`
-			await this.client.sRem(functionSetKey, WORKER_ID)
+
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Starting pipelined Redis cleanup operations at ${Date.now()}`)
+			const startTime = Date.now()
+
+			// Use Redis pipelining to batch cleanup commands
+			const pipeline = this.client.multi()
+			pipeline.del(metadataKey)
+			pipeline.sRem(functionSetKey, WORKER_ID)
+
+			await pipeline.exec()
+
+			const endTime = Date.now()
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Pipelined Redis cleanup completed in ${endTime - startTime}ms`)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata removed: ${metadataKey}`)
 			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Removed from function set: ${functionSetKey}`)
 		} catch (error) {
 			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Failed to unregister function from Redis:`, error)
