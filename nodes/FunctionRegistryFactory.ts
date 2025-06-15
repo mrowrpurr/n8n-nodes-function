@@ -91,15 +91,20 @@ async function loadGlobalConfigAsync(): Promise<void> {
 		}
 
 		// Try to connect to Redis with configured settings
+		const socketConfig: any = {
+			host: redisConfigOverride.host,
+			port: redisConfigOverride.port,
+			reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+			connectTimeout: 500, // 500ms timeout for config loading
+		}
+
+		// Only add tls property if it's true
+		if (redisConfigOverride.ssl === true) {
+			socketConfig.tls = true
+		}
+
 		const client = createClient({
-			socket: {
-				host: redisConfigOverride.host,
-				port: redisConfigOverride.port,
-				tls: redisConfigOverride.ssl,
-				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-				connectTimeout: 500, // 500ms timeout for config loading
-				commandTimeout: 500,
-			},
+			socket: socketConfig,
 			database: redisConfigOverride.database,
 			username: redisConfigOverride.user || undefined,
 			password: redisConfigOverride.password || undefined,

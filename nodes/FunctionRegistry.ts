@@ -81,15 +81,21 @@ class FunctionRegistry {
 		if (!this.redisConfig) {
 			throw new Error("Redis configuration not set. Please configure Redis credentials.")
 		}
+
+		const socketConfig: any = {
+			host: this.redisConfig.host,
+			port: this.redisConfig.port,
+			reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+			connectTimeout: 100, // 100ms connect timeout
+		}
+
+		// Only add tls property if it's true
+		if (this.redisConfig.ssl === true) {
+			socketConfig.tls = true
+		}
+
 		return {
-			socket: {
-				host: this.redisConfig.host,
-				port: this.redisConfig.port,
-				tls: this.redisConfig.ssl === true,
-				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-				connectTimeout: 100, // 100ms connect timeout
-				commandTimeout: 100, // 100ms command timeout
-			},
+			socket: socketConfig,
 			database: this.redisConfig.database,
 			username: this.redisConfig.user || undefined,
 			password: this.redisConfig.password || undefined,
@@ -433,7 +439,9 @@ class FunctionRegistry {
 
 				// Re-add claimed messages to the stream for reprocessing
 				for (const message of claimed.messages) {
-					await this.client.xAdd(streamKey, "*", message.message)
+					if (message && message.message) {
+						await this.client.xAdd(streamKey, "*", message.message)
+					}
 				}
 			}
 		} catch (error) {
