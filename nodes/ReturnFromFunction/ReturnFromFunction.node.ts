@@ -1,5 +1,5 @@
 import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription } from "n8n-workflow"
-import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { getFunctionRegistryAsync } from "../FunctionRegistryFactory"
 
 export class ReturnFromFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -88,7 +88,7 @@ export class ReturnFromFunction implements INodeType {
 				console.error("🔴 ReturnFromFunction: Code execution error:", error)
 
 				// Get execution ID for error handling
-				const registry = getFunctionRegistry()
+				const registry = await getFunctionRegistryAsync()
 				const functionExecutionId = registry.getCurrentFunctionExecution()
 				const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
 
@@ -115,7 +115,7 @@ export class ReturnFromFunction implements INodeType {
 			console.log("🔴 ReturnFromFunction: Final return value =", parsedReturnValue)
 
 			// Get execution ID from the registry (set by the Function node)
-			const registry = getFunctionRegistry()
+			const registry = await getFunctionRegistryAsync()
 			console.log("🔴 ReturnFromFunction: Getting current function execution from registry...")
 
 			const functionExecutionId = registry.getCurrentFunctionExecution()

@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { getFunctionRegistryAsync } from "../FunctionRegistryFactory"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -172,7 +172,7 @@ export class CallFunction implements INodeType {
 				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
 				console.log("🔧 CallFunction: Global function mode:", globalFunction)
 
-				const registry = getFunctionRegistry()
+				const registry = await getFunctionRegistryAsync()
 				let availableFunctions
 
 				if (globalFunction) {
@@ -223,7 +223,7 @@ export class CallFunction implements INodeType {
 					return []
 				}
 
-				const registry = getFunctionRegistry()
+				const registry = await getFunctionRegistryAsync()
 				let parameters
 
 				if (globalFunction) {
@@ -337,7 +337,7 @@ export class CallFunction implements INodeType {
 			}
 
 			// Get function parameter definitions for validation
-			const registry = getFunctionRegistry()
+			const registry = await getFunctionRegistryAsync()
 			let functionParameterDefs
 
 			if (globalFunction) {
