@@ -145,7 +145,7 @@ class FunctionRegistry {
 					registeredAt: new Date().toISOString(),
 				}
 
-				const redisKey = `function:${functionName}:${executionId}`
+				const redisKey = `function:${executionId}:${functionName}`
 				await this.redisClient.set(redisKey, JSON.stringify(metadata), { EX: 3600 }) // 1 hour expiry
 				console.log("🎯 FunctionRegistry: Function metadata stored in Redis:", redisKey)
 
@@ -162,8 +162,27 @@ class FunctionRegistry {
 							console.log(`🔔 FunctionRegistry: Received function call request for ${functionName}:`, message)
 							const { callId, parameters: callParams, inputItem, responseChannel, callerExecutionId } = JSON.parse(message)
 
-							// Find the callback in local memory
-							const listener = this.listeners.get(key)
+							// Find the callback in local memory - try multiple keys for global functions
+							let listener = this.listeners.get(key) // Try the original key first
+
+							// If not found and this might be a global function call, try the global key
+							if (!listener) {
+								const globalKey = `${functionName}-__global__`
+								listener = this.listeners.get(globalKey)
+								console.log(`🔔 FunctionRegistry: Trying global key for ${functionName}:`, globalKey, listener ? "found" : "not found")
+							}
+
+							// If still not found, try any instance of this function
+							if (!listener) {
+								for (const [listenerKey, listenerValue] of this.listeners.entries()) {
+									if (listenerValue.functionName === functionName) {
+										listener = listenerValue
+										console.log(`🔔 FunctionRegistry: Found function ${functionName} with key:`, listenerKey)
+										break
+									}
+								}
+							}
+
 							if (!listener) {
 								console.warn(`🔔 FunctionRegistry: No local callback for function ${functionName}, cannot execute`)
 								return
@@ -219,7 +238,7 @@ class FunctionRegistry {
 				if (!this.redisClient) throw new Error("Redis client not available")
 
 				// Remove metadata from Redis
-				const redisKey = `function:${functionName}:${executionId}`
+				const redisKey = `function:${executionId}:${functionName}`
 				await this.redisClient.del(redisKey)
 				console.log("🎯 FunctionRegistry: Function metadata removed from Redis:", redisKey)
 
@@ -288,9 +307,16 @@ class FunctionRegistry {
 				}
 
 				// Check if function exists in Redis
-				const redisKeys = await this.redisClient.keys(`function:${functionName}:*`)
+				const redisKeys = await this.redisClient.keys(`function:*:${functionName}`)
 				if (redisKeys.length === 0) {
 					console.log("🔧 FunctionRegistry: Function not found in Redis either:", functionName)
+					return { result: null, actualExecutionId: uniqueCallId }
+				}
+
+				// Only use cross-process calls for global functions (executionId = "__global__")
+				if (executionId !== "__global__" && executionId !== "__active__") {
+					console.log("🔧 FunctionRegistry: Function found in Redis but not using cross-process for local execution:", executionId)
+					console.log("🔧 FunctionRegistry: Local functions should be registered in the same execution")
 					return { result: null, actualExecutionId: uniqueCallId }
 				}
 
@@ -366,14 +392,19 @@ class FunctionRegistry {
 	}
 
 	async getAvailableFunctions(executionId?: string): Promise<Array<{ name: string; value: string }>> {
+		console.log("🎯 FunctionRegistry: getAvailableFunctions called with executionId:", executionId)
 		const functionNames = new Set<string>()
 
 		// Get functions from local memory
+		console.log("🎯 FunctionRegistry: Checking local memory listeners...")
 		for (const listener of this.listeners.values()) {
+			console.log("🎯 FunctionRegistry: Found listener:", listener.functionName, "with executionId:", listener.executionId)
 			// If executionId is specified, only include functions for that execution
 			if (executionId && listener.executionId !== executionId) {
+				console.log("🎯 FunctionRegistry: Skipping listener due to executionId mismatch")
 				continue
 			}
+			console.log("🎯 FunctionRegistry: Adding function to list:", listener.functionName)
 			functionNames.add(listener.functionName)
 		}
 
@@ -382,17 +413,22 @@ class FunctionRegistry {
 			try {
 				await this.ensureRedisConnection()
 				if (this.redisClient) {
+					console.log("🎯 FunctionRegistry: Checking Redis for functions...")
 					const redisKeys = await this.redisClient.keys("function:*")
+					console.log("🎯 FunctionRegistry: Found Redis keys:", redisKeys)
 					for (const key of redisKeys) {
 						const parts = key.split(":")
-						if (parts.length >= 2) {
-							const functionName = parts[1]
-							const keyExecutionId = parts[2]
+						if (parts.length >= 3) {
+							const keyExecutionId = parts[1]
+							const functionName = parts.slice(2).join(":") // Handle function names with colons
+							console.log("🎯 FunctionRegistry: Redis function:", functionName, "with executionId:", keyExecutionId)
 
 							// If executionId is specified, only include functions for that execution
 							if (executionId && keyExecutionId !== executionId) {
+								console.log("🎯 FunctionRegistry: Skipping Redis function due to executionId mismatch")
 								continue
 							}
+							console.log("🎯 FunctionRegistry: Adding Redis function to list:", functionName)
 							functionNames.add(functionName)
 						}
 					}
@@ -402,6 +438,7 @@ class FunctionRegistry {
 			}
 		}
 
+		console.log("🎯 FunctionRegistry: Final function names:", Array.from(functionNames))
 		// Convert to array of options for n8n dropdown
 		return Array.from(functionNames).map((name) => ({
 			name,
@@ -438,7 +475,7 @@ class FunctionRegistry {
 			try {
 				await this.ensureRedisConnection()
 				if (this.redisClient) {
-					const redisKeys = await this.redisClient.keys(`function:${functionName}:*`)
+					const redisKeys = await this.redisClient.keys(`function:*:${functionName}`)
 					for (const key of redisKeys) {
 						const metadataJson = await this.redisClient.get(key)
 						if (metadataJson) {

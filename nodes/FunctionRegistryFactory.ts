@@ -41,7 +41,9 @@ export function getFunctionRegistry(): FunctionRegistry | FunctionRegistryRedis 
 
 		return redisRegistry
 	} else {
-		console.log("🏭 FunctionRegistryFactory: Using in-memory FunctionRegistry")
+		console.log("🏭 FunctionRegistryFactory: Using in-memory FunctionRegistry with Redis support")
+		// The current FunctionRegistry has Redis support built-in when USE_REDIS = true
+		// This allows global functions to work even in "in-memory" mode
 		return FunctionRegistry.getInstance()
 	}
 }
