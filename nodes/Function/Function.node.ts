@@ -7,7 +7,8 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { FunctionRegistry, type ParameterDefinition } from "../FunctionRegistry"
+import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { type ParameterDefinition } from "../FunctionRegistry"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
@@ -169,7 +170,7 @@ export class Function implements INodeType {
 		console.log("🎯 Function: Raw execution ID:", executionId)
 		console.log("🎯 Function: Parameter list:", parameterList)
 
-		const registry = FunctionRegistry.getInstance()
+		const registry = getFunctionRegistry()
 
 		// Create the function callback that will be invoked by CallFunction
 		const functionCallback = async (functionParameters: Record<string, any>, inputItem: INodeExecutionData): Promise<INodeExecutionData[]> => {

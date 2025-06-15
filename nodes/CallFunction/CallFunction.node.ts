@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { FunctionRegistry } from "../FunctionRegistry"
+import { getFunctionRegistry } from "../FunctionRegistryFactory"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -172,21 +172,21 @@ export class CallFunction implements INodeType {
 				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
 				console.log("🔧 CallFunction: Global function mode:", globalFunction)
 
-				const registry = FunctionRegistry.getInstance()
+				const registry = getFunctionRegistry()
 				let availableFunctions
 
 				if (globalFunction) {
 					// Only show global functions
-					availableFunctions = registry.getAvailableFunctions("__global__")
+					availableFunctions = await registry.getAvailableFunctions("__global__")
 				} else {
 					// Show local functions (current execution and __active__)
 					const executionId = this.getExecutionId()
 					const effectiveExecutionId = executionId ?? "__active__"
-					availableFunctions = registry.getAvailableFunctions(effectiveExecutionId)
+					availableFunctions = await registry.getAvailableFunctions(effectiveExecutionId)
 
 					// Also include __active__ functions if we're in a real execution
 					if (executionId && effectiveExecutionId !== "__active__") {
-						const activeFunctions = registry.getAvailableFunctions("__active__")
+						const activeFunctions = await registry.getAvailableFunctions("__active__")
 						availableFunctions = [...availableFunctions, ...activeFunctions]
 					}
 
@@ -223,19 +223,19 @@ export class CallFunction implements INodeType {
 					return []
 				}
 
-				const registry = FunctionRegistry.getInstance()
+				const registry = getFunctionRegistry()
 				let parameters
 
 				if (globalFunction) {
-					parameters = registry.getFunctionParameters(functionName, "__global__")
+					parameters = await registry.getFunctionParameters(functionName, "__global__")
 				} else {
 					const executionId = this.getExecutionId()
 					const effectiveExecutionId = executionId ?? "__active__"
-					parameters = registry.getFunctionParameters(functionName, effectiveExecutionId)
+					parameters = await registry.getFunctionParameters(functionName, effectiveExecutionId)
 
 					// If not found with current execution, try __active__ fallback
 					if (parameters.length === 0 && effectiveExecutionId !== "__active__") {
-						parameters = registry.getFunctionParameters(functionName, "__active__")
+						parameters = await registry.getFunctionParameters(functionName, "__active__")
 					}
 				}
 
@@ -337,23 +337,23 @@ export class CallFunction implements INodeType {
 			}
 
 			// Get function parameter definitions for validation
-			const registry = FunctionRegistry.getInstance()
+			const registry = getFunctionRegistry()
 			let functionParameterDefs
 
 			if (globalFunction) {
-				functionParameterDefs = registry.getFunctionParameters(functionName, "__global__")
+				functionParameterDefs = await registry.getFunctionParameters(functionName, "__global__")
 			} else {
 				const executionId = this.getExecutionId()
 				const effectiveExecutionId = executionId ?? "__active__"
-				functionParameterDefs = registry.getFunctionParameters(functionName, effectiveExecutionId)
+				functionParameterDefs = await registry.getFunctionParameters(functionName, effectiveExecutionId)
 
 				// If not found with current execution, try __active__ fallback
 				if (functionParameterDefs.length === 0 && effectiveExecutionId !== "__active__") {
-					functionParameterDefs = registry.getFunctionParameters(functionName, "__active__")
+					functionParameterDefs = await registry.getFunctionParameters(functionName, "__active__")
 				}
 			}
 
-			const validParameterNames = new Set(functionParameterDefs.map((p) => p.name))
+			const validParameterNames = new Set(functionParameterDefs.map((p: any) => p.name))
 
 			// Prepare parameters to pass to the function
 			let functionParameters: Record<string, any> = {}
