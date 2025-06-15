@@ -1,6 +1,6 @@
 import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
-import { FunctionRegistry } from "../FunctionRegistry"
+import { enableRedisMode, disableRedisMode, getFunctionRegistry } from "../FunctionRegistryFactory"
 
 export class ConfigureFunctions implements INodeType {
 	description: INodeTypeDescription = {
@@ -91,12 +91,9 @@ export class ConfigureFunctions implements INodeType {
 			console.log("⚙️ ConfigureFunctions: 🚀 CONFIGURING GLOBAL REDIS SETTINGS")
 			console.log("⚙️ ConfigureFunctions: About to configure Redis with host:", redisConfig.host, "port:", redisConfig.port)
 
-			// Configure the global FunctionRegistry instance with Redis settings
-			const registry = FunctionRegistry.getInstance()
-
-			// Update the registry's Redis configuration
-			registry.setRedisConfig(redisConfig.host, redisConfig.port)
-			console.log("⚙️ ConfigureFunctions: ✅ Redis configuration applied to FunctionRegistry")
+			// Enable Redis mode using the factory
+			enableRedisMode(redisConfig.host)
+			console.log("⚙️ ConfigureFunctions: ✅ Redis mode enabled via FunctionRegistryFactory")
 
 			console.log("⚙️ ConfigureFunctions: 🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
 
@@ -104,7 +101,8 @@ export class ConfigureFunctions implements INodeType {
 			if (testConnection) {
 				console.log("⚙️ ConfigureFunctions: Testing Redis connection...")
 				try {
-					// Test the connection by attempting to connect
+					// Get the registry and test the connection
+					const registry = getFunctionRegistry()
 					await registry.testRedisConnection()
 					console.log("⚙️ ConfigureFunctions: Redis connection test successful")
 
@@ -157,8 +155,9 @@ export class ConfigureFunctions implements INodeType {
 		} else {
 			console.log("⚙️ ConfigureFunctions: Using in-memory mode")
 
-			// For in-memory mode, we don't need to do anything special
-			// The FunctionRegistry will work in-memory by default when Redis is not configured
+			// Disable Redis mode using the factory
+			disableRedisMode()
+			console.log("⚙️ ConfigureFunctions: ✅ Redis mode disabled via FunctionRegistryFactory")
 
 			// Emit configuration event
 			this.emit([

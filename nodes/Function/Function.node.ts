@@ -7,7 +7,8 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { getInstance as getFunctionRegistry, type ParameterDefinition } from "../FunctionRegistry"
+import { getFunctionRegistry, enableRedisMode, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { type ParameterDefinition } from "../FunctionRegistry"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
@@ -143,6 +144,13 @@ export class Function implements INodeType {
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		console.log("🌊 Function: Starting stream-based trigger setup")
 
+		// Auto-enable queue mode if not already enabled
+		// This ensures Function triggers register in Redis even if ConfigureFunctions hasn't run yet
+		if (!isQueueModeEnabled()) {
+			enableRedisMode() // Uses default "redis" host
+			console.log("🌊 Function: Auto-enabled Redis queue mode for trigger registration")
+		}
+
 		// Get function configuration
 		const globalFunction = this.getNodeParameter("globalFunction", 0) as boolean
 		const functionName = this.getNode().name
@@ -210,6 +218,20 @@ export class Function implements INodeType {
 
 							console.log("🌊 Function: Call ID:", callId)
 							console.log("🌊 Function: Parameters:", params)
+
+							// Check for Redis host metadata and reconfigure if needed
+							if (inputItem.json && inputItem.json._function_call_metadata && inputItem.json._function_call_metadata.redis_host) {
+								const metadataRedisHost = inputItem.json._function_call_metadata.redis_host
+								const currentRedisHost = getRedisHost()
+
+								if (metadataRedisHost !== currentRedisHost) {
+									console.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
+									enableRedisMode(metadataRedisHost)
+								}
+
+								// Clean up the metadata so it doesn't pollute downstream nodes
+								delete inputItem.json._function_call_metadata
+							}
 
 							// Note: We'll embed the call context in the output item instead of static data
 							// since static data doesn't transfer between workers in queue mode

@@ -1,5 +1,5 @@
 import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
-import { getInstance as getFunctionRegistry } from "../FunctionRegistry"
+import { getFunctionRegistry, enableRedisMode, isQueueModeEnabled } from "../FunctionRegistryFactory"
 
 export class ReturnFromFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -38,6 +38,21 @@ export class ReturnFromFunction implements INodeType {
 		const items = this.getInputData()
 		console.log("🌊 ReturnFromFunction: Input items count:", items.length)
 		console.log("🌊 ReturnFromFunction: Input items:", items)
+
+		// Auto-enable queue mode if not already enabled
+		// This ensures ReturnFromFunction can publish responses to Redis
+		if (!isQueueModeEnabled()) {
+			// Check if there's Redis host metadata in the first item
+			let metadataHost = "redis"
+			if (items[0]?.json?._function_call_metadata && typeof items[0].json._function_call_metadata === "object") {
+				const metadata = items[0].json._function_call_metadata as any
+				if (metadata.redis_host && typeof metadata.redis_host === "string") {
+					metadataHost = metadata.redis_host
+				}
+			}
+			enableRedisMode(metadataHost)
+			console.log(`🌊 ReturnFromFunction: Auto-enabled Redis queue mode (host: ${metadataHost})`)
+		}
 
 		const returnData: INodeExecutionData[] = []
 		const registry = getFunctionRegistry()

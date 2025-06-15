@@ -1,5 +1,6 @@
 import { createClient, RedisClientType } from "redis"
 import { INodeExecutionData } from "n8n-workflow"
+import { isQueueModeEnabled } from "./FunctionRegistryFactory"
 
 export interface ParameterDefinition {
 	name: string
@@ -74,6 +75,12 @@ class FunctionRegistry {
 	}
 
 	private async ensureRedisConnection(): Promise<void> {
+		// Skip Redis connection entirely if queue mode is not enabled
+		if (!isQueueModeEnabled()) {
+			console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis connection`)
+			return
+		}
+
 		if (this.client && this.isConnected) {
 			return
 		}

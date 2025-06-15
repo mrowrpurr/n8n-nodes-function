@@ -5,8 +5,21 @@ This guide explains how to use the new **Functions Redis Credentials** and **Con
 ## Overview
 
 The Function system now supports two modes:
-- **In-Memory Mode**: Functions are stored locally in each n8n process (default)
+- **In-Memory Mode**: Functions are stored locally in each n8n process (default, no Redis required)
 - **Redis Mode**: Functions are stored in Redis and can be shared across multiple n8n processes (queue mode)
+
+## Key Benefits
+
+### Single-Process Compatibility
+- **No Redis Required**: When no Configure Functions node is present, or when "Use Redis" is disabled, the system runs entirely in-memory
+- **Zero Redis Dependencies**: Perfect for `npx n8n` development, single-threaded deployments, or environments without Redis
+- **Automatic Fallback**: If Redis connection fails, functions still work locally within the same workflow
+
+### Queue Mode Support
+- **Multi-Worker**: Functions can be called across different n8n worker processes
+- **Cross-Workflow**: Functions defined in one workflow can be called from another
+- **Reliable Delivery**: Uses Redis Streams for guaranteed message delivery
+- **Worker Health**: Automatic heartbeat monitoring and failover
 
 ## Setup
 
