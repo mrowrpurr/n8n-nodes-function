@@ -166,6 +166,10 @@ export class Function implements INodeType {
 		logger.debug("Workflow ID:", workflowId)
 		logger.debug("Parameter list:", parameterList)
 
+		// Don't use any cached Redis config - let ConfigureFunctions set it first
+		const { resetGlobalConfig } = await import("../FunctionRegistryFactory")
+		resetGlobalConfig()
+
 		const registry = await getFunctionRegistry()
 
 		// Convert parameter list to ParameterDefinition format
@@ -181,18 +185,52 @@ export class Function implements INodeType {
 		if (isQueueModeEnabled()) {
 			logger.debug("Queue mode enabled, setting up Redis streams")
 
-			// Create stream and register function metadata
-			const streamKey = await registry.createStream(functionName, scope)
-			const groupName = `group:${functionName}`
-			const consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
+			// Declare variables outside try block for proper scope
+			let streamKey: string
+			let groupName: string
+			let consumerName: string
 
-			// Store function metadata in Redis
-			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [])
+			try {
+				// Create stream and register function metadata
+				streamKey = await registry.createStream(functionName, scope)
+				groupName = `group:${functionName}`
+				consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-			// Start heartbeat
-			registry.startHeartbeat(functionName, scope)
+				// Store function metadata in Redis
+				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [])
 
-			logger.debug("Stream created and function registered, starting consumer loop")
+				// Start heartbeat
+				registry.startHeartbeat(functionName, scope)
+
+				logger.debug("Stream created and function registered, starting consumer loop")
+			} catch (error) {
+				logger.error("Failed to set up Redis streams during activation:", error.message)
+				logger.info("Function will fall back to in-memory mode")
+				// Fall back to in-memory mode
+				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
+					logger.log("🌊 Function: In-memory fallback function called:", functionName, "with parameters:", parameters)
+					return [inputItem]
+				})
+
+				return {
+					closeFunction: async () => {
+						logger.log("🌊 Function: Trigger closing, cleaning up in-memory fallback function")
+						await registry.unregisterFunction(functionName, scope)
+					},
+					manualTriggerFunction: async () => {
+						const triggerData: INodeExecutionData = {
+							json: {
+								functionName,
+								registered: true,
+								scope,
+								mode: "in-memory-fallback",
+								timestamp: new Date().toISOString(),
+							},
+						}
+						this.emit([[triggerData]])
+					},
+				}
+			}
 
 			// Start the stream consumer loop
 			let isActive = true

@@ -487,8 +487,27 @@ export class CallFunction implements INodeType {
 
 			try {
 				// Check if queue mode is enabled to determine call method
-				if (isQueueModeEnabled()) {
-					logger.log("🌊 CallFunction: Queue mode enabled, using Redis streams")
+				logger.debug("🔍 CallFunction: Checking queue mode status...")
+				const queueModeStatus = isQueueModeEnabled()
+				logger.debug("🔍 CallFunction: Queue mode enabled =", queueModeStatus)
+
+				// In queue mode, also check if we have Redis configuration
+				const registry = await getFunctionRegistry()
+				let useRedisStreams = queueModeStatus
+
+				// If queue mode flag is false but we have Redis config, try to use Redis anyway
+				if (!useRedisStreams) {
+					try {
+						await registry.testRedisConnection()
+						useRedisStreams = true
+						logger.log("🔍 CallFunction: Queue mode flag is false but Redis is available, using Redis streams")
+					} catch (error) {
+						logger.debug("🔍 CallFunction: Redis not available, using in-memory mode:", error.message)
+					}
+				}
+
+				if (useRedisStreams) {
+					logger.log("🌊 CallFunction: Using Redis streams for function call")
 
 					// Generate unique call ID
 					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -618,7 +637,7 @@ export class CallFunction implements INodeType {
 					logger.log("🌊 CallFunction: Created result item =", resultItem)
 					returnData.push(resultItem)
 				} else {
-					logger.log("🔧 CallFunction: Queue mode disabled, using direct in-memory call")
+					logger.log("🔧 CallFunction: Using direct in-memory call")
 
 					// Call function directly via registry
 					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
