@@ -331,46 +331,77 @@ export class Function implements INodeType {
 			this.emit([this.helpers.returnJsonArray([outputItem])])
 			console.log("🎯 Function: Data emitted successfully")
 
-			// Use promise-based return handling instead of polling
+			// Use promise-based return handling with Redis pub/sub for cross-process calls
 			console.log("🎯 Function: Setting up promise-based return handling...")
 
-			// Create a return promise for this execution
-			const returnPromise = registry.createReturnPromise(currentExecutionId)
-			console.log("🎯 Function: Return promise created")
-
-			// Wait to detect if this is a void function
-			// Use longer timeout for cross-process calls (Redis pub/sub)
-			console.log("🎯 Function: Checking if this is a void function...")
 			const isRedisCall = currentFunctionExecution !== null // We're in a Redis pub/sub call if there's a function execution on stack
-			const voidDetectionTimeout = isRedisCall ? 5000 : 50 // 5 seconds for Redis calls, 50ms for local calls
-			console.log("🎯 Function: Using timeout:", voidDetectionTimeout, "ms (Redis call:", isRedisCall, ")")
+			console.log("🎯 Function: Redis call detected:", isRedisCall)
 			let returnValue = null
 
-			try {
-				// Race between the return promise and a timeout for void function detection
-				returnValue = await Promise.race([
-					returnPromise,
-					new Promise<null>((resolve) => {
-						setTimeout(() => {
-							console.log("🎯 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
-							console.log("🎯 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
-							resolve(null)
-						}, voidDetectionTimeout)
-					}),
-				])
+			if (isRedisCall) {
+				// For Redis calls, listen for pub/sub notification of return value
+				console.log("🎯 Function: Setting up Redis pub/sub listener for return value...")
 
-				// If we got null from the timeout, this is a void function
-				if (returnValue === null) {
-					console.log("🎯 Function: 🟡 Completing immediately for void function")
-					registry.cleanupReturnPromise(currentExecutionId)
-				} else {
-					console.log("🎯 Function: ✅ Return value received via promise:", returnValue)
+				try {
+					// Poll Redis for return value with short intervals
+					const startTime = Date.now()
+					const maxWaitTime = 1000 // 1 second max wait
+					const pollInterval = 50 // Check every 50ms
+
+					console.log("🎯 Function: Polling Redis for return value...")
+
+					while (Date.now() - startTime < maxWaitTime) {
+						const value = await registry.getFunctionReturnValue(currentExecutionId)
+						if (value !== null) {
+							console.log("🎯 Function: ✅ Return value found via polling:", value)
+							returnValue = value
+							break
+						}
+
+						// Wait before next poll
+						await new Promise((resolve) => setTimeout(resolve, pollInterval))
+					}
+
+					if (returnValue === null) {
+						console.log("🎯 Function: 🟡 No return detected after 1 second, treating as void function")
+					}
+				} catch (error) {
+					console.error("🎯 Function: Error with Redis polling return handling:", error)
+					returnValue = null
 				}
-			} catch (error) {
-				console.error("🎯 Function: ❌ Error occurred while waiting for return value:", error)
-				registry.cleanupReturnPromise(currentExecutionId)
-				// For errors, we'll still complete the function (could add error handling here)
-				returnValue = null
+			} else {
+				// For local calls, use the existing promise-based approach
+				console.log("🎯 Function: Using local promise-based return handling...")
+
+				// Create a return promise for this execution
+				const returnPromise = registry.createReturnPromise(currentExecutionId)
+				console.log("🎯 Function: Return promise created")
+
+				try {
+					// Race between the return promise and a timeout for void function detection
+					returnValue = await Promise.race([
+						returnPromise,
+						new Promise<null>((resolve) => {
+							setTimeout(() => {
+								console.log("🎯 Function: 🟡 No return detected in 50ms")
+								console.log("🎯 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
+								resolve(null)
+							}, 50)
+						}),
+					])
+
+					// If we got null from the timeout, this is a void function
+					if (returnValue === null) {
+						console.log("🎯 Function: 🟡 Completing immediately for void function")
+						registry.cleanupReturnPromise(currentExecutionId)
+					} else {
+						console.log("🎯 Function: ✅ Return value received via promise:", returnValue)
+					}
+				} catch (error) {
+					console.error("🎯 Function: ❌ Error occurred while waiting for return value:", error)
+					registry.cleanupReturnPromise(currentExecutionId)
+					returnValue = null
+				}
 			}
 
 			console.log("🎯 Function: Function execution completed, final return value:", returnValue)
