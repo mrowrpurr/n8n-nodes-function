@@ -384,8 +384,21 @@ export class Function implements INodeType {
 
 		// Register the function with the registry
 		if (registry.constructor.name === "FunctionRegistryWorkflow") {
-			// For workflow registry, pass additional parameters
-			;(registry as any).registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback, undefined, undefined, enableCode, code)
+			// For workflow registry, pass additional parameters including actual workflow ID
+			const actualWorkflowId = this.getWorkflow().id
+			console.log("🎯 Function: Registering with workflow registry, actual workflow ID:", actualWorkflowId)
+			;(registry as any).registerFunction(
+				functionName,
+				effectiveExecutionId,
+				nodeId,
+				parameterDefinitions,
+				functionCallback,
+				undefined,
+				undefined,
+				enableCode,
+				code,
+				actualWorkflowId
+			)
 		} else {
 			// For other registries, use the standard signature
 			registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)

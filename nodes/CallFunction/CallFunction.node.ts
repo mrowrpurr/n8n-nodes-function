@@ -435,16 +435,35 @@ export class CallFunction implements INodeType {
 
 			try {
 				// Try to call the function with target execution ID
-				let callResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
-				let functionResult = callResult.result
-				let actualExecutionId = "actualExecutionId" in callResult ? callResult.actualExecutionId : callResult.callId
+				let callResult
+				let functionResult
+				let actualExecutionId
+
+				if (registry.constructor.name === "FunctionRegistryWorkflow") {
+					// For workflow registry, pass the executeWorkflow context
+					console.log("🔧 CallFunction: Using workflow registry with executeWorkflow context")
+					callResult = await (registry as any).callFunction(functionName, targetExecutionId, functionParameters, item, this)
+					functionResult = callResult.result
+					actualExecutionId = callResult.callId
+				} else {
+					// For other registries, use standard call
+					callResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
+					functionResult = callResult.result
+					actualExecutionId = "actualExecutionId" in callResult ? callResult.actualExecutionId : callResult.callId
+				}
 
 				// If not found and not global, try with "__active__" fallback
 				if (functionResult === null && !globalFunction && targetExecutionId !== "__active__") {
 					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
-					callResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
-					functionResult = callResult.result
-					actualExecutionId = "actualExecutionId" in callResult ? callResult.actualExecutionId : callResult.callId
+					if (registry.constructor.name === "FunctionRegistryWorkflow") {
+						callResult = await (registry as any).callFunction(functionName, "__active__", functionParameters, item, this)
+						functionResult = callResult.result
+						actualExecutionId = callResult.callId
+					} else {
+						callResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
+						functionResult = callResult.result
+						actualExecutionId = "actualExecutionId" in callResult ? callResult.actualExecutionId : callResult.callId
+					}
 				}
 
 				if (functionResult === null) {

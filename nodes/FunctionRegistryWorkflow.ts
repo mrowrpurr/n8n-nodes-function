@@ -91,7 +91,7 @@ class FunctionRegistryWorkflow {
 	}
 
 	/**
-	 * Register a function by storing its workflow definition in Redis
+	 * Register a function by storing its workflow metadata in Redis
 	 */
 	async registerFunction(
 		functionName: string,
@@ -102,25 +102,26 @@ class FunctionRegistryWorkflow {
 		workflowNodes?: INode[],
 		workflowConnections?: IConnections,
 		enableCode?: boolean,
-		jsCode?: string
+		jsCode?: string,
+		workflowId?: string // Add actual workflow ID parameter
 	): Promise<void> {
-		// Extract workflowId from executionId or use a default
-		const workflowId = executionId === "__global__" ? "__global__" : executionId === "__active__" ? "__active__" : executionId?.split("_")[0] || "default"
+		// Use provided workflowId or extract from executionId
+		const actualWorkflowId = workflowId || (executionId === "__global__" ? "__global__" : executionId === "__active__" ? "__active__" : executionId?.split("_")[0] || "default")
 		const isGlobal = executionId === "__global__"
-		console.log("🎯 FunctionRegistryWorkflow: Registering function:", functionName, "workflow:", workflowId, "global:", isGlobal)
+		console.log("🎯 FunctionRegistryWorkflow: Registering function:", functionName, "workflow:", actualWorkflowId, "global:", isGlobal)
 
 		try {
 			await this.ensureRedisConnection()
 			if (!this.client) throw new Error("Redis client not available")
 
-			// Create serialized function definition
+			// Create simplified function definition - we only need metadata since we'll use executeWorkflow
 			const functionDefinition: SerializedFunctionDefinition = {
 				functionName,
-				workflowId,
+				workflowId: actualWorkflowId,
 				isGlobal,
 				parameters,
-				nodes: workflowNodes || [],
-				connections: workflowConnections || {},
+				nodes: [], // Don't store full workflow - we'll use executeWorkflow API
+				connections: {},
 				startNodeId: nodeId,
 				createdAt: new Date().toISOString(),
 				enableCode: enableCode || false,
@@ -128,11 +129,12 @@ class FunctionRegistryWorkflow {
 			}
 
 			// Store in Redis with simple keys
-			const redisKey = isGlobal ? `function:global:${functionName}` : `function:workflow:${workflowId}:${functionName}`
+			const redisKey = isGlobal ? `function:global:${functionName}` : `function:workflow:${actualWorkflowId}:${functionName}`
 			await this.client.set(redisKey, JSON.stringify(functionDefinition), { EX: 3600 }) // 1 hour expiry
-			console.log("🎯 FunctionRegistryWorkflow: Function definition stored in Redis:", redisKey)
+			console.log("🎯 FunctionRegistryWorkflow: Function metadata stored in Redis:", redisKey)
+			console.log("🎯 FunctionRegistryWorkflow: Will use executeWorkflow API with workflow ID:", actualWorkflowId)
 		} catch (error) {
-			console.error("🎯 FunctionRegistryWorkflow: Failed to store function definition in Redis:", error)
+			console.error("🎯 FunctionRegistryWorkflow: Failed to store function metadata in Redis:", error)
 		}
 	}
 
@@ -157,13 +159,14 @@ class FunctionRegistryWorkflow {
 	}
 
 	/**
-	 * Call a function by loading its workflow definition from Redis and executing it locally
+	 * Call a function by executing its workflow using n8n's executeWorkflow API
 	 */
 	async callFunction(
 		functionName: string,
 		workflowId: string,
 		parameters: Record<string, any>,
-		inputItem: INodeExecutionData
+		inputItem: INodeExecutionData,
+		executeFunctions?: any // IExecuteFunctions context for calling executeWorkflow
 	): Promise<{ result: INodeExecutionData[] | null; callId: string }> {
 		console.log("🔧 FunctionRegistryWorkflow: Looking for function:", functionName, "in workflow:", workflowId)
 
@@ -194,10 +197,45 @@ class FunctionRegistryWorkflow {
 			const functionDefinition: SerializedFunctionDefinition = JSON.parse(definitionJson)
 			console.log("🔧 FunctionRegistryWorkflow: Function definition loaded from Redis")
 
-			// Execute the function locally using the stored definition
-			const result = await this.executeFunction(functionDefinition, parameters, inputItem, callId)
+			// Use n8n's executeWorkflow API to actually execute the workflow containing the Function node
+			if (executeFunctions && typeof executeFunctions.executeWorkflow === "function") {
+				console.log("🔧 FunctionRegistryWorkflow: Executing workflow via n8n's executeWorkflow API")
 
-			return { result, callId }
+				// Prepare input data with function parameters
+				const workflowInputData = [
+					{
+						json: {
+							...inputItem.json,
+							...parameters,
+							_functionCall: {
+								functionName,
+								callId,
+								parameters,
+							},
+						},
+						binary: inputItem.binary,
+					},
+				]
+
+				const workflowInfo = {
+					id: functionDefinition.workflowId,
+				}
+
+				const executionResult = await executeFunctions.executeWorkflow(workflowInfo, workflowInputData)
+
+				console.log("🔧 FunctionRegistryWorkflow: Workflow execution completed:", executionResult)
+
+				// Return the workflow execution results
+				return {
+					result: executionResult.data || [],
+					callId,
+				}
+			} else {
+				console.warn("🔧 FunctionRegistryWorkflow: No executeWorkflow context available, falling back to local execution")
+				// Fallback to local execution if no executeWorkflow context
+				const result = await this.executeFunction(functionDefinition, parameters, inputItem, callId)
+				return { result, callId }
+			}
 		} catch (error) {
 			console.error("🔧 FunctionRegistryWorkflow: Error calling function:", error)
 			return { result: null, callId }
