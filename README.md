@@ -14,7 +14,7 @@ Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal En
 
 Define reusable logic blocks with `Function`, call them with `Call Function`, and return values with `Return From Function`.
 
-<img src="screenshots/canvas-with-two-functions.png" alt="Canvas with two functions" width="600" />
+<img src="screenshots/canvas-with-two-functions.png" alt="Canvas with two functions" width="800" />
 
 ## 📦 Features
 
@@ -59,17 +59,17 @@ It's just a different level of abstraction and a different way of organizing log
 
 ### ⚡ `Function` trigger (_similar to `When Executed by Another Workflow`_)
 
-<img src="screenshots/functions-like-when-executed-by.png" alt="Functions are like When Executed By" width="600" />
+<img src="screenshots/functions-like-when-executed-by.png" alt="Functions are like When Executed By" width="800" />
 
 > One limitation of the `When Executed by Another Workflow` node is that it can only be used once in a workflow.
 >
-> <img src="screenshots/only-one-execute-workflow-trigger.png" alt="Only one Execute Workflow Trigger node is allowed in a workflow" width="300" />
+> <img src="screenshots/only-one-execute-workflow-trigger.png" alt="Only one Execute Workflow Trigger node is allowed in a workflow" width="350" />
 >
 > Whereas `Function` nodes can be used multiple times in a workflow, allowing for a different way of organizing reusable code.
 
 ### ➡️ `Call Function` (_similar to `Execute Workflow`_)
 
-<img src="screenshots/call-function-like-execute-workflow.png" alt="Call Function is like Execute Workflow" width="600" />
+<img src="screenshots/call-function-like-execute-workflow.png" alt="Call Function is like Execute Workflow" width="800" />
 
 ## 🎓 Getting Started
 
