@@ -53,21 +53,18 @@ class FunctionRegistryRedis {
 			this.client = createClient({
 				url: `redis://${this.redisHost}:${this.redisPort}`,
 				socket: {
-					reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 				},
 			})
-
-			this.client.on("error", (err) => {
+			;(this.client as any).on("error", (err: any) => {
 				console.error("🔴 FunctionRegistryRedis: Redis Client Error", err)
 				this.isConnected = false
 			})
-
-			this.client.on("connect", () => {
+			;(this.client as any).on("connect", () => {
 				console.log("🔴 FunctionRegistryRedis: Redis Client Connected")
 				this.isConnected = true
 			})
-
-			this.client.on("disconnect", () => {
+			;(this.client as any).on("disconnect", () => {
 				console.log("🔴 FunctionRegistryRedis: Redis Client Disconnected")
 				this.isConnected = false
 			})

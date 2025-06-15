@@ -332,6 +332,21 @@ class FunctionRegistrySimplified {
 		return null
 	}
 
+	async clearFunctionReturnValue(callId: string): Promise<void> {
+		console.log("🎯 FunctionRegistrySimplified: 🗑️  CLEARING return value for call:", callId)
+
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) throw new Error("Redis client not available")
+
+			const redisKey = `return:${callId}`
+			await this.client.del(redisKey)
+			console.log("🎯 FunctionRegistrySimplified: 🗑️  Return value cleared from Redis")
+		} catch (error) {
+			console.error("🎯 FunctionRegistrySimplified: Error clearing return value from Redis:", error)
+		}
+	}
+
 	// Simplified stack management
 	getCurrentCallContext(): string | undefined {
 		return this.callContextStack[this.callContextStack.length - 1]
@@ -386,6 +401,16 @@ class FunctionRegistrySimplified {
 		const promiseHandlers = this.returnPromises.get(callId)
 		if (promiseHandlers) {
 			promiseHandlers.resolve(value)
+			this.returnPromises.delete(callId)
+		}
+	}
+
+	async rejectReturn(callId: string, error: any): Promise<void> {
+		console.log("🎯 FunctionRegistrySimplified: ❌ Rejecting return promise for call:", callId, "with error:", error)
+
+		const promiseHandlers = this.returnPromises.get(callId)
+		if (promiseHandlers) {
+			promiseHandlers.reject(error)
 			this.returnPromises.delete(callId)
 		}
 	}
