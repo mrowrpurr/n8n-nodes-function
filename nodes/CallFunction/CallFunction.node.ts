@@ -599,17 +599,6 @@ export class CallFunction implements INodeType {
 					// Start with the original item
 					let resultJson: any = { ...item.json }
 
-					// Add Redis host metadata if available
-					try {
-						const currentRedisHost = getRedisHost()
-						if (!resultJson._function_call_metadata) {
-							resultJson._function_call_metadata = {}
-						}
-						resultJson._function_call_metadata.redis_host = currentRedisHost
-					} catch (error) {
-						// Redis host not configured, skip metadata
-					}
-
 					// Always include the function result, but how it's stored depends on storeResponse setting
 					if (response.data !== null) {
 						if (storeResponse && responseVariableName && responseVariableName.trim()) {
