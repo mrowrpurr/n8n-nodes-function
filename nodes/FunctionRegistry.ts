@@ -160,7 +160,7 @@ class FunctionRegistry {
 					await subscriber.subscribe(callChannel, async (message) => {
 						try {
 							console.log(`🔔 FunctionRegistry: Received function call request for ${functionName}:`, message)
-							const { callId, parameters: callParams, inputItem, responseChannel } = JSON.parse(message)
+							const { callId, parameters: callParams, inputItem, responseChannel, callerExecutionId } = JSON.parse(message)
 
 							// Find the callback in local memory
 							const listener = this.listeners.get(key)
@@ -171,11 +171,19 @@ class FunctionRegistry {
 
 							// Execute the callback directly (like in-memory registry!)
 							console.log(`🔔 FunctionRegistry: Executing callback for ${functionName} with params:`, callParams)
+							console.log(`🔔 FunctionRegistry: Using caller execution ID for context:`, callerExecutionId)
+
+							// Set up execution context for this function call
+							if (callerExecutionId) {
+								this.pushCurrentFunctionExecution(callerExecutionId)
+								await this.clearFunctionReturnValue(callerExecutionId)
+							}
+
 							const result = await listener.callback(callParams, inputItem)
 							console.log(`🔔 FunctionRegistry: Callback result:`, result)
 
 							// Send result back via pub/sub
-							const response = { callId, result }
+							const response = { callId, result, executionId: callerExecutionId }
 							if (this.redisPublisher) {
 								await this.redisPublisher.publish(responseChannel, JSON.stringify(response))
 								console.log(`🔔 FunctionRegistry: Published result to ${responseChannel}:`, response)
@@ -314,7 +322,9 @@ class FunctionRegistry {
 							const response = JSON.parse(message)
 							console.log(`🔧 FunctionRegistry: Received pub/sub response for ${functionName}:`, response)
 							await responseSubscriber.disconnect()
-							resolve({ result: response.result, actualExecutionId: uniqueCallId })
+							// Use the execution ID from the response for return value coordination
+							const responseExecutionId = response.executionId || uniqueCallId
+							resolve({ result: response.result, actualExecutionId: responseExecutionId })
 						} catch (error) {
 							console.error(`🔧 FunctionRegistry: Error parsing pub/sub response:`, error)
 							await responseSubscriber.disconnect()
@@ -328,6 +338,7 @@ class FunctionRegistry {
 						parameters,
 						inputItem,
 						responseChannel,
+						callerExecutionId: executionId, // Pass the caller's execution ID
 					}
 					const callChannel = `function:call:${functionName}`
 					console.log(`🔧 FunctionRegistry: Publishing call request to ${callChannel}:`, request)

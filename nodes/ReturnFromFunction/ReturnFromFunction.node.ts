@@ -136,16 +136,16 @@ export class ReturnFromFunction implements INodeType {
 			console.log("🔴 ReturnFromFunction: Resolving return promise...")
 
 			try {
-				registry.resolveReturn(effectiveExecutionId, parsedReturnValue)
+				await registry.resolveReturn(effectiveExecutionId, parsedReturnValue)
 				console.log("🔴 ReturnFromFunction: ✅ Return promise resolved successfully!")
 
 				// Verify the value was actually stored
-				const verifyValue = registry.getFunctionReturnValue(effectiveExecutionId)
+				const verifyValue = await registry.getFunctionReturnValue(effectiveExecutionId)
 				console.log("🔴 ReturnFromFunction: Verification - stored value retrieval:", verifyValue)
 			} catch (error) {
 				console.error("🔴 ReturnFromFunction: ❌ Error resolving return promise:", error)
 				// Fall back to direct storage if promise resolution fails
-				registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
+				await registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
 				console.log("🔴 ReturnFromFunction: 🟡 Fell back to direct value storage")
 			}
 

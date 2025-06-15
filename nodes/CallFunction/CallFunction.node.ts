@@ -458,7 +458,7 @@ export class CallFunction implements INodeType {
 				console.log("🔧 CallFunction: About to check for return value...")
 				console.log("🔧 CallFunction: Looking for return value under execution ID:", actualExecutionId)
 
-				const returnValue = registry.getFunctionReturnValue(actualExecutionId)
+				const returnValue = await registry.getFunctionReturnValue(actualExecutionId)
 				console.log("🔧 CallFunction: Function return value retrieved =", returnValue)
 				console.log("🔧 CallFunction: Return value type:", typeof returnValue)
 				console.log("🔧 CallFunction: Return value === null?", returnValue === null)
@@ -476,7 +476,7 @@ export class CallFunction implements INodeType {
 				// Clear the return value from registry after retrieving it
 				if (returnValue !== null) {
 					console.log("🔧 CallFunction: Clearing return value from registry...")
-					registry.clearFunctionReturnValue(actualExecutionId)
+					await registry.clearFunctionReturnValue(actualExecutionId)
 					console.log("🔧 CallFunction: Return value cleared")
 				}
 

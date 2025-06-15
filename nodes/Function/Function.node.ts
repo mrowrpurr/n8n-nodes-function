@@ -186,7 +186,7 @@ export class Function implements INodeType {
 			registry.pushCurrentFunctionExecution(currentExecutionId)
 
 			// Clear any existing return value for this execution
-			registry.clearFunctionReturnValue(currentExecutionId)
+			await registry.clearFunctionReturnValue(currentExecutionId)
 
 			// Process parameters according to function definition
 			const locals: Record<string, any> = {}
@@ -383,12 +383,12 @@ export class Function implements INodeType {
 		}))
 
 		// Register the function with the registry
-		registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)
+		await registry.registerFunction(functionName, effectiveExecutionId, nodeId, parameterDefinitions, functionCallback)
 
 		// Define cleanup function
 		const closeFunction = async () => {
 			console.log("🎯 Function: Cleaning up function:", functionName)
-			registry.unregisterFunction(functionName, effectiveExecutionId)
+			await registry.unregisterFunction(functionName, effectiveExecutionId)
 		}
 
 		return {
