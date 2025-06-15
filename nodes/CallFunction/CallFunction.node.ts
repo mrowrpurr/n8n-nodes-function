@@ -191,28 +191,46 @@ export class CallFunction implements INodeType {
 						]
 					}
 				} else {
-					// Show local functions - get all functions and filter out globals
-					logger.log("🔧 CallFunction: Getting all functions and filtering out global ones")
-					const allFunctions = await registry.getAvailableFunctions() // Get all functions without scope filter
+					// Show local functions - get functions for current workflow scope
+					logger.log("🔧 CallFunction: Getting functions for current workflow scope")
 
-					// Filter to only show non-global functions
-					const localFunctions = []
-					for (const func of allFunctions) {
-						// Check if this function is NOT global by checking if it exists in global scope
-						try {
-							const globalParams = await registry.getFunctionParameters(func.value, "__global__")
-							// If we can't get parameters with global scope, it's a local function
-							if (globalParams.length === 0) {
-								localFunctions.push(func)
-							}
-						} catch (error) {
-							// If there's an error getting global params, assume it's local
-							localFunctions.push(func)
-						}
+					// Try to get the current workflow ID
+					let workflowId = "unknown"
+					try {
+						workflowId = this.getWorkflow().id || "unknown"
+					} catch (error) {
+						logger.log("🔧 CallFunction: Could not get workflow ID:", error.message)
 					}
 
-					logger.log("🔧 CallFunction: Found local functions:", localFunctions)
-					availableFunctions = localFunctions
+					logger.log("🔧 CallFunction: Current workflow ID:", workflowId)
+
+					if (workflowId !== "unknown") {
+						// Get functions specifically for this workflow
+						availableFunctions = await registry.getAvailableFunctions(workflowId)
+						logger.log("🔧 CallFunction: Found functions for workflow scope:", availableFunctions)
+					} else {
+						// Fallback: get all functions and filter out globals manually
+						logger.log("🔧 CallFunction: Workflow ID unknown, getting all functions and filtering")
+						const allFunctions = await registry.getAvailableFunctions()
+
+						// Filter to only show non-global functions by checking if they have global scope parameters
+						const localFunctions = []
+						for (const func of allFunctions) {
+							try {
+								const globalParams = await registry.getFunctionParameters(func.value, "__global__")
+								// If function has parameters in global scope, it's global; otherwise it's local
+								if (globalParams.length === 0) {
+									localFunctions.push(func)
+								}
+							} catch (error) {
+								// If there's an error getting global params, assume it's local
+								localFunctions.push(func)
+							}
+						}
+
+						availableFunctions = localFunctions
+						logger.log("🔧 CallFunction: Found local functions after filtering:", availableFunctions)
+					}
 
 					// If no local functions found, add a helpful message
 					if (availableFunctions.length === 0) {

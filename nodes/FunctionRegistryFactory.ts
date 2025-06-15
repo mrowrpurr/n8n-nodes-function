@@ -109,7 +109,7 @@ async function loadGlobalConfigAsync(): Promise<void> {
 
 		if (configJson) {
 			const config = JSON.parse(configJson)
-			logger.debug("Found global config:", config)
+			logger.info("Found global config in Redis:", config)
 
 			if (config.queueMode === true) {
 				logger.info("Enabling queue mode from global config")
@@ -120,14 +120,19 @@ async function loadGlobalConfigAsync(): Promise<void> {
 					if (!redisConfigOverride) {
 						redisConfigOverride = {
 							host: config.redisHost,
-							port: 6379,
-							database: 0,
-							user: "",
-							password: "",
-							ssl: false,
+							port: config.redisPort || 6379,
+							database: config.redisDatabase || 0,
+							user: config.redisUser || "",
+							password: config.redisPassword || "",
+							ssl: config.redisSsl || false,
 						}
 					} else {
 						redisConfigOverride.host = config.redisHost
+						if (config.redisPort) redisConfigOverride.port = config.redisPort
+						if (config.redisDatabase !== undefined) redisConfigOverride.database = config.redisDatabase
+						if (config.redisUser) redisConfigOverride.user = config.redisUser
+						if (config.redisPassword) redisConfigOverride.password = config.redisPassword
+						if (config.redisSsl !== undefined) redisConfigOverride.ssl = config.redisSsl
 					}
 				}
 			}
@@ -145,6 +150,14 @@ async function loadGlobalConfigAsync(): Promise<void> {
 let configLoadingPromise: Promise<void> | null = null
 
 export async function getFunctionRegistry(): Promise<FunctionRegistry> {
+	// Load global config from Redis on first access if not already loaded
+	if (!globalConfigLoaded) {
+		if (!configLoadingPromise) {
+			configLoadingPromise = loadGlobalConfigAsync()
+		}
+		await configLoadingPromise
+	}
+
 	logger.debug("Queue mode enabled =", queueModeEnabled)
 
 	const registry = FunctionRegistry.getInstance()

@@ -813,32 +813,16 @@ class FunctionRegistry {
 			}
 		}
 
-		// Try Redis (in queue mode or when Redis is available)
-		let shouldCheckRedis = isQueueModeEnabled()
-
-		// If queue mode flag is false but Redis might be available, try Redis anyway
-		if (!shouldCheckRedis) {
-			try {
-				await this.testRedisConnection()
-				shouldCheckRedis = true
-				logger.debug(`Queue mode flag is false but Redis is available, checking Redis for function parameters`)
-			} catch (error) {
-				logger.debug(`Redis not available for function parameters, using local only:`, error.message)
-			}
-		}
-
-		if (shouldCheckRedis) {
+		// Try Redis (only in queue mode)
+		if (isQueueModeEnabled()) {
 			try {
 				await this.ensureRedisConnection()
 				if (this.client) {
 					const metadataKeys = await this.client.keys(`function:meta:*:${functionName}`)
-					logger.debug(`Found ${metadataKeys.length} metadata keys for function ${functionName}:`, metadataKeys)
 					if (metadataKeys.length > 0) {
 						const metadataHash = await this.client.hGetAll(metadataKeys[0])
 						if (metadataHash && metadataHash.parameters) {
-							const parameters = JSON.parse(metadataHash.parameters)
-							logger.debug(`Found function parameters in Redis for ${functionName}:`, parameters)
-							return parameters
+							return JSON.parse(metadataHash.parameters)
 						}
 					}
 				}
