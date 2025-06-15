@@ -88,20 +88,18 @@ async function loadGlobalConfigAsync(): Promise<void> {
 	globalConfigLoaded = true // Mark as attempted to avoid multiple attempts
 
 	try {
-		// Try to connect to Redis with current config to read global config
-		const currentConfig = getRedisConfig()
+		// Try to connect to Redis with default config to read global config
+		// Don't use cached config here as it might be stale
 		const client = createClient({
 			socket: {
-				host: currentConfig.host,
-				port: currentConfig.port,
-				tls: currentConfig.ssl === true,
+				host: "redis",
+				port: 6379,
+				tls: false,
 				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 				connectTimeout: 500, // 500ms timeout for config loading
 				commandTimeout: 500,
 			},
-			database: currentConfig.database,
-			username: currentConfig.user || undefined,
-			password: currentConfig.password || undefined,
+			database: 0,
 		})
 
 		await client.connect()
@@ -147,14 +145,6 @@ async function loadGlobalConfigAsync(): Promise<void> {
 let configLoadingPromise: Promise<void> | null = null
 
 export async function getFunctionRegistry(): Promise<FunctionRegistry> {
-	// Ensure global config is loaded before proceeding
-	if (!globalConfigLoaded) {
-		if (!configLoadingPromise) {
-			configLoadingPromise = loadGlobalConfigAsync()
-		}
-		await configLoadingPromise
-	}
-
 	logger.debug("Queue mode enabled =", queueModeEnabled)
 
 	const registry = FunctionRegistry.getInstance()
@@ -171,6 +161,16 @@ export async function getFunctionRegistry(): Promise<FunctionRegistry> {
 	}
 
 	return registry
+}
+
+// Separate function for loading global config - only used by ConfigureFunctions
+export async function loadGlobalConfig(): Promise<void> {
+	if (!globalConfigLoaded) {
+		if (!configLoadingPromise) {
+			configLoadingPromise = loadGlobalConfigAsync()
+		}
+		await configLoadingPromise
+	}
 }
 // Convenience function to enable Redis mode and set host in one call
 export function enableRedisMode(host: string = "redis"): void {
