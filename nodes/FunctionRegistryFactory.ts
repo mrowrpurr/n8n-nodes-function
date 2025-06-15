@@ -1,5 +1,6 @@
 import { FunctionRegistry } from "./FunctionRegistry"
 import { createClient } from "redis"
+import { functionRegistryFactoryLogger as logger } from "./Logger"
 
 // Static configuration for Redis host and queue mode
 let redisHostOverride: string | null = null
@@ -7,7 +8,7 @@ let queueModeEnabled: boolean = false
 let globalConfigLoaded: boolean = false
 
 export function setRedisHost(host: string): void {
-	console.log("🏭 FunctionRegistryFactory: Setting Redis host override:", host)
+	logger.info("Setting Redis host override:", host)
 	redisHostOverride = host
 
 	// Update existing registry instance if it exists
@@ -16,7 +17,7 @@ export function setRedisHost(host: string): void {
 }
 
 export function setQueueMode(enabled: boolean): void {
-	console.log("🏭 FunctionRegistryFactory: Setting queue mode:", enabled)
+	logger.info("Setting queue mode:", enabled)
 	queueModeEnabled = enabled
 }
 
@@ -33,8 +34,7 @@ async function loadGlobalConfigAsync(): Promise<void> {
 	if (globalConfigLoaded) {
 		return
 	}
-
-	console.log("🏭 FunctionRegistryFactory: Loading global configuration from Redis...")
+	logger.debug("Loading global configuration from Redis...")
 	globalConfigLoaded = true // Mark as attempted to avoid multiple attempts
 
 	try {
@@ -55,24 +55,24 @@ async function loadGlobalConfigAsync(): Promise<void> {
 
 		if (configJson) {
 			const config = JSON.parse(configJson)
-			console.log("🏭 FunctionRegistryFactory: Found global config:", config)
+			logger.debug("Found global config:", config)
 
 			if (config.queueMode === true) {
-				console.log("🏭 FunctionRegistryFactory: Enabling queue mode from global config")
+				logger.info("Enabling queue mode from global config")
 				queueModeEnabled = true
 
 				if (config.redisHost) {
-					console.log("🏭 FunctionRegistryFactory: Setting Redis host from global config:", config.redisHost)
+					logger.info("Setting Redis host from global config:", config.redisHost)
 					redisHostOverride = config.redisHost
 				}
 			}
 		} else {
-			console.log("🏭 FunctionRegistryFactory: No global config found, using defaults")
+			logger.debug("No global config found, using defaults")
 		}
 
 		await client.disconnect()
 	} catch (error) {
-		console.log("🏭 FunctionRegistryFactory: Could not load global config from Redis (using defaults):", error.message)
+		logger.debug("Could not load global config from Redis (using defaults):", error.message)
 	}
 }
 
@@ -88,32 +88,32 @@ export async function getFunctionRegistry(): Promise<FunctionRegistry> {
 		await configLoadingPromise
 	}
 
-	console.log("🏭 FunctionRegistryFactory: Queue mode enabled =", queueModeEnabled)
+	logger.debug("Queue mode enabled =", queueModeEnabled)
 
 	const registry = FunctionRegistry.getInstance()
 
 	if (queueModeEnabled) {
-		console.log("🏭 FunctionRegistryFactory: Using Redis-backed FunctionRegistry")
+		logger.debug("Using Redis-backed FunctionRegistry")
 
 		// Apply Redis host override if set
 		if (redisHostOverride) {
 			registry.setRedisConfig(redisHostOverride)
 		}
 	} else {
-		console.log("🏭 FunctionRegistryFactory: Using in-memory FunctionRegistry (Redis disabled)")
+		logger.debug("Using in-memory FunctionRegistry (Redis disabled)")
 	}
 
 	return registry
 }
 // Convenience function to enable Redis mode and set host in one call
 export function enableRedisMode(host: string = "redis"): void {
-	console.log("🏭 FunctionRegistryFactory: Enabling Redis mode with host:", host)
+	logger.info("Enabling Redis mode with host:", host)
 	setRedisHost(host)
 	setQueueMode(true)
 }
 
 // Convenience function to disable Redis mode
 export function disableRedisMode(): void {
-	console.log("🏭 FunctionRegistryFactory: Disabling Redis mode")
+	logger.info("Disabling Redis mode")
 	setQueueMode(false)
 }

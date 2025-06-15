@@ -1,6 +1,7 @@
 import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
 import { enableRedisMode, disableRedisMode, getFunctionRegistry } from "../FunctionRegistryFactory"
+import { configureFunctionsLogger as logger } from "../Logger"
 
 export class ConfigureFunctions implements INodeType {
 	description: INodeTypeDescription = {
@@ -48,20 +49,20 @@ export class ConfigureFunctions implements INodeType {
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		console.log("⚙️ ConfigureFunctions: ===== STARTING GLOBAL CONFIGURATION =====")
-		console.log("⚙️ ConfigureFunctions: Node execution started")
+		logger.info("===== STARTING GLOBAL CONFIGURATION =====")
+		logger.debug("Node execution started")
 
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
 
-		console.log("⚙️ ConfigureFunctions: Parameters retrieved:")
-		console.log("⚙️ ConfigureFunctions: - Use Redis =", useRedis)
-		console.log("⚙️ ConfigureFunctions: - Test connection =", testConnection)
+		logger.debug("Parameters retrieved:")
+		logger.debug("- Use Redis =", useRedis)
+		logger.debug("- Test connection =", testConnection)
 
 		// Configure the function registry based on Redis setting
 		if (useRedis) {
-			console.log("⚙️ ConfigureFunctions: Enabling Redis mode")
+			logger.info("Enabling Redis mode")
 
 			// Get Redis credentials if provided
 			let redisConfig = {
@@ -83,17 +84,17 @@ export class ConfigureFunctions implements INodeType {
 					password: credentials.password || "",
 					ssl: credentials.ssl || false,
 				}
-				console.log("⚙️ ConfigureFunctions: Using Redis credentials - host:", redisConfig.host, "port:", redisConfig.port)
+				logger.debug("Using Redis credentials - host:", redisConfig.host, "port:", redisConfig.port)
 			} catch (error) {
-				console.warn("⚙️ ConfigureFunctions: No Redis credentials provided, using defaults:", error.message)
+				logger.warn("No Redis credentials provided, using defaults:", error.message)
 			}
 
-			console.log("⚙️ ConfigureFunctions: 🚀 CONFIGURING GLOBAL REDIS SETTINGS")
-			console.log("⚙️ ConfigureFunctions: About to configure Redis with host:", redisConfig.host, "port:", redisConfig.port)
+			logger.debug("🚀 CONFIGURING GLOBAL REDIS SETTINGS")
+			logger.debug("About to configure Redis with host:", redisConfig.host, "port:", redisConfig.port)
 
 			// Enable Redis mode using the factory
 			enableRedisMode(redisConfig.host)
-			console.log("⚙️ ConfigureFunctions: ✅ Redis mode enabled via FunctionRegistryFactory")
+			logger.info("✅ Redis mode enabled via FunctionRegistryFactory")
 
 			// Store global config in Redis for workers to read
 			try {
@@ -107,28 +108,28 @@ export class ConfigureFunctions implements INodeType {
 					timestamp: new Date().toISOString(),
 				}
 
-				console.log("⚙️ ConfigureFunctions: Storing global config in Redis:", globalConfig)
+				logger.debug("Storing global config in Redis:", globalConfig)
 
 				// Use the registry's Redis client to store config
 				const client = (registry as any).client
 				if (client) {
 					await client.set("function:global_config", JSON.stringify(globalConfig), { EX: 86400 }) // 24 hour expiry
-					console.log("⚙️ ConfigureFunctions: ✅ Global config stored in Redis")
+					logger.info("✅ Global config stored in Redis")
 				}
 			} catch (error) {
-				console.error("⚙️ ConfigureFunctions: Failed to store global config in Redis:", error)
+				logger.error("Failed to store global config in Redis:", error)
 			}
 
-			console.log("⚙️ ConfigureFunctions: 🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
+			logger.debug("🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
 
 			// Test connection if requested
 			if (testConnection) {
-				console.log("⚙️ ConfigureFunctions: Testing Redis connection...")
+				logger.debug("Testing Redis connection...")
 				try {
 					// Get the registry and test the connection
 					const registry = await getFunctionRegistry()
 					await registry.testRedisConnection()
-					console.log("⚙️ ConfigureFunctions: Redis connection test successful")
+					logger.info("Redis connection test successful")
 
 					// Emit a test configuration event
 					this.emit([
@@ -144,7 +145,7 @@ export class ConfigureFunctions implements INodeType {
 						]),
 					])
 				} catch (error) {
-					console.error("⚙️ ConfigureFunctions: Redis connection test failed:", error)
+					logger.error("Redis connection test failed:", error)
 
 					// Emit error event
 					this.emit([
@@ -177,11 +178,11 @@ export class ConfigureFunctions implements INodeType {
 				])
 			}
 		} else {
-			console.log("⚙️ ConfigureFunctions: Using in-memory mode")
+			logger.info("Using in-memory mode")
 
 			// Disable Redis mode using the factory
 			disableRedisMode()
-			console.log("⚙️ ConfigureFunctions: ✅ Redis mode disabled via FunctionRegistryFactory")
+			logger.info("✅ Redis mode disabled via FunctionRegistryFactory")
 
 			// Try to clear global config from Redis if it exists
 			try {
@@ -199,9 +200,9 @@ export class ConfigureFunctions implements INodeType {
 				await client.connect()
 				await client.del("function:global_config")
 				await client.disconnect()
-				console.log("⚙️ ConfigureFunctions: ✅ Global config cleared from Redis")
+				logger.debug("✅ Global config cleared from Redis")
 			} catch (error) {
-				console.log("⚙️ ConfigureFunctions: Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
+				logger.debug("Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
 			}
 
 			// Emit configuration event
@@ -218,7 +219,7 @@ export class ConfigureFunctions implements INodeType {
 
 		// Define cleanup function
 		const closeFunction = async () => {
-			console.log("⚙️ ConfigureFunctions: Cleaning up configuration")
+			logger.debug("Cleaning up configuration")
 		}
 
 		return {

@@ -9,6 +9,7 @@ import {
 } from "n8n-workflow"
 import { getFunctionRegistry, enableRedisMode, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { type ParameterDefinition } from "../FunctionRegistry"
+import { functionNodeLogger as logger } from "../Logger"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
@@ -142,7 +143,7 @@ export class Function implements INodeType {
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		console.log("🌊 Function: Starting stream-based trigger setup")
+		logger.info("Starting stream-based trigger setup")
 
 		// Get function configuration
 		const globalFunction = this.getNodeParameter("globalFunction", 0) as boolean
@@ -160,10 +161,10 @@ export class Function implements INodeType {
 		// Determine scope for stream registration
 		const scope = globalFunction ? "__global__" : workflowId
 
-		console.log("🌊 Function: Registering function:", functionName, "with scope:", scope)
-		console.log("🌊 Function: Global function:", globalFunction)
-		console.log("🌊 Function: Workflow ID:", workflowId)
-		console.log("🌊 Function: Parameter list:", parameterList)
+		logger.info("Registering function:", functionName, "with scope:", scope)
+		logger.debug("Global function:", globalFunction)
+		logger.debug("Workflow ID:", workflowId)
+		logger.debug("Parameter list:", parameterList)
 
 		const registry = await getFunctionRegistry()
 
@@ -178,7 +179,7 @@ export class Function implements INodeType {
 
 		// Check if queue mode is enabled for Redis operations
 		if (isQueueModeEnabled()) {
-			console.log("🌊 Function: Queue mode enabled, setting up Redis streams")
+			logger.debug("Queue mode enabled, setting up Redis streams")
 
 			// Create stream and register function metadata
 			const streamKey = await registry.createStream(functionName, scope)
@@ -191,7 +192,7 @@ export class Function implements INodeType {
 			// Start heartbeat
 			registry.startHeartbeat(functionName, scope)
 
-			console.log("🌊 Function: Stream created and function registered, starting consumer loop")
+			logger.debug("Stream created and function registered, starting consumer loop")
 
 			// Start the stream consumer loop
 			let isActive = true
@@ -399,7 +400,7 @@ export class Function implements INodeType {
 				console.error("🌊 Function: Fatal error in stream consumer:", error)
 			})
 
-			console.log("🌊 Function: Function registered successfully, starting stream consumer")
+			logger.info("Function registered successfully, starting stream consumer")
 
 			// Return trigger response with cleanup for queue mode
 			return {
@@ -432,7 +433,7 @@ export class Function implements INodeType {
 				},
 			}
 		} else {
-			console.log("🌊 Function: Queue mode disabled, using in-memory registration")
+			logger.debug("Queue mode disabled, using in-memory registration")
 
 			// Register function in memory only
 			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
@@ -616,7 +617,7 @@ export class Function implements INodeType {
 				return [outputItem]
 			})
 
-			console.log("🌊 Function: Function registered successfully in in-memory mode")
+			logger.info("Function registered successfully in in-memory mode")
 
 			// Return trigger response with cleanup for in-memory mode
 			return {

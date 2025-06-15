@@ -1,6 +1,7 @@
 import { createClient, RedisClientType } from "redis"
 import { INodeExecutionData } from "n8n-workflow"
 import { isQueueModeEnabled } from "./FunctionRegistryFactory"
+import { functionRegistryLogger as logger } from "./Logger"
 
 export interface ParameterDefinition {
 	name: string
@@ -519,8 +520,8 @@ class FunctionRegistry {
 		callback: (parameters: Record<string, any>, inputItem: INodeExecutionData) => Promise<INodeExecutionData[]>
 	): Promise<void> {
 		const key = `${functionName}-${executionId}`
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Registering function: ${key}`)
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Parameters:`, parameters)
+		logger.info(`Registering function: ${key}`)
+		logger.debug(`Parameters:`, parameters)
 
 		// Store callback in memory (callbacks can't be serialized to Redis)
 		this.listeners.set(key, {
@@ -533,7 +534,7 @@ class FunctionRegistry {
 
 		// Store metadata in Redis for cross-process access (only in queue mode)
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis metadata storage`)
+			logger.debug(`Queue mode disabled, skipping Redis metadata storage`)
 			return
 		}
 
