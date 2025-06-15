@@ -2,18 +2,48 @@ import { FunctionRegistry } from "./FunctionRegistry"
 import { createClient } from "redis"
 import { functionRegistryFactoryLogger as logger } from "./Logger"
 
-// Static configuration for Redis host and queue mode
-let redisHostOverride: string | null = null
+// Redis configuration interface
+export interface RedisConfig {
+	host: string
+	port: number
+	database: number
+	user: string
+	password: string
+	ssl: boolean
+}
+
+// Static configuration for Redis and queue mode
+let redisConfigOverride: RedisConfig | null = null
 let queueModeEnabled: boolean = false
 let globalConfigLoaded: boolean = false
 
-export function setRedisHost(host: string): void {
-	logger.info("Setting Redis host override:", host)
-	redisHostOverride = host
+export function setRedisConfig(config: RedisConfig): void {
+	logger.info("Setting Redis config override:", config)
+	redisConfigOverride = config
 
 	// Update existing registry instance if it exists
 	const registry = FunctionRegistry.getInstance()
-	registry.setRedisConfig(host)
+	registry.setRedisConfig(config)
+}
+
+export function setRedisHost(host: string): void {
+	logger.info("Setting Redis host override:", host)
+	if (!redisConfigOverride) {
+		redisConfigOverride = {
+			host,
+			port: 6379,
+			database: 0,
+			user: "",
+			password: "",
+			ssl: false,
+		}
+	} else {
+		redisConfigOverride.host = host
+	}
+
+	// Update existing registry instance if it exists
+	const registry = FunctionRegistry.getInstance()
+	registry.setRedisConfig(redisConfigOverride)
 }
 
 export function setQueueMode(enabled: boolean): void {
@@ -22,7 +52,20 @@ export function setQueueMode(enabled: boolean): void {
 }
 
 export function getRedisHost(): string {
-	return redisHostOverride || "redis"
+	return redisConfigOverride?.host || "redis"
+}
+
+export function getRedisConfig(): RedisConfig {
+	return (
+		redisConfigOverride || {
+			host: "redis",
+			port: 6379,
+			database: 0,
+			user: "",
+			password: "",
+			ssl: false,
+		}
+	)
 }
 
 export function isQueueModeEnabled(): boolean {
@@ -38,15 +81,20 @@ async function loadGlobalConfigAsync(): Promise<void> {
 	globalConfigLoaded = true // Mark as attempted to avoid multiple attempts
 
 	try {
-		// Try to connect to Redis with current host to read global config
-		const currentHost = redisHostOverride || "redis"
+		// Try to connect to Redis with current config to read global config
+		const currentConfig = getRedisConfig()
 		const client = createClient({
-			url: `redis://${currentHost}:6379`,
 			socket: {
+				host: currentConfig.host,
+				port: currentConfig.port,
+				tls: currentConfig.ssl === true,
 				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 				connectTimeout: 500, // 500ms timeout for config loading
 				commandTimeout: 500,
 			},
+			database: currentConfig.database,
+			username: currentConfig.user || undefined,
+			password: currentConfig.password || undefined,
 		})
 
 		await client.connect()
@@ -64,7 +112,18 @@ async function loadGlobalConfigAsync(): Promise<void> {
 
 				if (config.redisHost) {
 					logger.info("Setting Redis host from global config:", config.redisHost)
-					redisHostOverride = config.redisHost
+					if (!redisConfigOverride) {
+						redisConfigOverride = {
+							host: config.redisHost,
+							port: 6379,
+							database: 0,
+							user: "",
+							password: "",
+							ssl: false,
+						}
+					} else {
+						redisConfigOverride.host = config.redisHost
+					}
 				}
 			}
 		} else {
@@ -96,9 +155,9 @@ export async function getFunctionRegistry(): Promise<FunctionRegistry> {
 	if (queueModeEnabled) {
 		logger.debug("Using Redis-backed FunctionRegistry")
 
-		// Apply Redis host override if set
-		if (redisHostOverride) {
-			registry.setRedisConfig(redisHostOverride)
+		// Apply Redis config override if set
+		if (redisConfigOverride) {
+			registry.setRedisConfig(redisConfigOverride)
 		}
 	} else {
 		logger.debug("Using in-memory FunctionRegistry (Redis disabled)")
@@ -115,8 +174,8 @@ export function enableRedisMode(host: string = "redis"): void {
 	// Immediately update any existing registry instance
 	try {
 		const registry = FunctionRegistry.getInstance()
-		registry.setRedisConfig(host)
-		logger.info("Updated existing registry with new Redis host:", host)
+		registry.setRedisConfig(redisConfigOverride!)
+		logger.info("Updated existing registry with new Redis config:", redisConfigOverride)
 	} catch (error) {
 		logger.debug("No existing registry to update (this is normal):", error.message)
 	}

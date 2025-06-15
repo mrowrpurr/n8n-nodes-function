@@ -1,6 +1,6 @@
 import { createClient, RedisClientType } from "redis"
 import { INodeExecutionData } from "n8n-workflow"
-import { isQueueModeEnabled } from "./FunctionRegistryFactory"
+import { isQueueModeEnabled, RedisConfig } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 
 export interface ParameterDefinition {
@@ -41,8 +41,14 @@ class FunctionRegistry {
 	private callContextStack: string[] = []
 	private returnPromises: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map()
 	private inMemoryReturnValues: Map<string, any> = new Map()
-	private redisHost: string = "redis"
-	private redisPort: number = 6379
+	private redisConfig: RedisConfig = {
+		host: "redis",
+		port: 6379,
+		database: 0,
+		user: "",
+		password: "",
+		ssl: false,
+	}
 	private isConnected: boolean = false
 	private isSubscriberSetup: boolean = false
 
@@ -60,10 +66,9 @@ class FunctionRegistry {
 	/**
 	 * Set Redis configuration (public method for ConfigureFunctions node)
 	 */
-	setRedisConfig(host: string, port: number = 6379): void {
-		logger.log(`Setting Redis config - host: ${host}, port: ${port}`)
-		this.redisHost = host
-		this.redisPort = port
+	setRedisConfig(config: RedisConfig): void {
+		logger.log(`Setting Redis config - host: ${config.host}, port: ${config.port}, database: ${config.database}, user: ${config.user}, ssl: ${config.ssl}`)
+		this.redisConfig = { ...config }
 		// Reset connection state to force reconnection with new config
 		this.isConnected = false
 		this.isSubscriberSetup = false
@@ -74,6 +79,25 @@ class FunctionRegistry {
 	 */
 	async testRedisConnection(): Promise<void> {
 		await this.ensureRedisConnection()
+	}
+
+	/**
+	 * Build Redis client configuration from stored config
+	 */
+	private buildRedisClientConfig() {
+		return {
+			socket: {
+				host: this.redisConfig.host,
+				port: this.redisConfig.port,
+				tls: this.redisConfig.ssl === true,
+				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+				connectTimeout: 100, // 100ms connect timeout
+				commandTimeout: 100, // 100ms command timeout
+			},
+			database: this.redisConfig.database,
+			username: this.redisConfig.user || undefined,
+			password: this.redisConfig.password || undefined,
+		}
 	}
 
 	private async ensureRedisConnection(): Promise<void> {
@@ -88,37 +112,18 @@ class FunctionRegistry {
 		}
 
 		try {
-			logger.log(`Connecting to Redis at redis://${this.redisHost}:${this.redisPort}`)
+			logger.log(`Connecting to Redis at ${this.redisConfig.host}:${this.redisConfig.port} (database: ${this.redisConfig.database}, ssl: ${this.redisConfig.ssl})`)
+
+			const clientConfig = this.buildRedisClientConfig()
 
 			// Main client for metadata storage
-			this.client = createClient({
-				url: `redis://${this.redisHost}:${this.redisPort}`,
-				socket: {
-					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-					connectTimeout: 100, // 100ms connect timeout
-					commandTimeout: 100, // 100ms command timeout
-				},
-			})
+			this.client = createClient(clientConfig)
 
 			// Dedicated publisher for sending messages
-			this.publisher = createClient({
-				url: `redis://${this.redisHost}:${this.redisPort}`,
-				socket: {
-					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-					connectTimeout: 100,
-					commandTimeout: 100,
-				},
-			})
+			this.publisher = createClient(clientConfig)
 
 			// Dedicated subscriber for receiving function calls
-			this.subscriber = createClient({
-				url: `redis://${this.redisHost}:${this.redisPort}`,
-				socket: {
-					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-					connectTimeout: 100,
-					commandTimeout: 100,
-				},
-			})
+			this.subscriber = createClient(clientConfig)
 
 			await this.client.connect()
 			await this.publisher.connect()
@@ -694,7 +699,7 @@ class FunctionRegistry {
 				}, timeoutMs)
 
 				// Subscribe to response
-				const responseSubscriber = createClient({ url: `redis://${this.redisHost}:${this.redisPort}` })
+				const responseSubscriber = createClient(this.buildRedisClientConfig())
 				await responseSubscriber.connect()
 
 				await responseSubscriber.subscribe(responseChannel, async (message) => {

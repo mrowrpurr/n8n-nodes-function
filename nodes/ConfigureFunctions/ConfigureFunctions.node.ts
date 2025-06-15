@@ -1,6 +1,6 @@
 import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
-import { enableRedisMode, disableRedisMode, getFunctionRegistry } from "../FunctionRegistryFactory"
+import { disableRedisMode, getFunctionRegistry, setRedisConfig, setQueueMode } from "../FunctionRegistryFactory"
 import { configureFunctionsLogger as logger } from "../Logger"
 
 export class ConfigureFunctions implements INodeType {
@@ -93,9 +93,10 @@ export class ConfigureFunctions implements INodeType {
 			logger.debug("About to configure Redis with host:", redisConfig.host, "port:", redisConfig.port)
 
 			// Enable Redis mode using the factory
-			logger.info("🔧 About to enable Redis mode with host:", redisConfig.host)
-			enableRedisMode(redisConfig.host)
-			logger.info("✅ Redis mode enabled via FunctionRegistryFactory with host:", redisConfig.host)
+			logger.info("🔧 About to enable Redis mode with config:", redisConfig)
+			setRedisConfig(redisConfig)
+			setQueueMode(true)
+			logger.info("✅ Redis mode enabled via FunctionRegistryFactory with config:", redisConfig)
 
 			// Store global config in Redis for workers to read
 			try {
@@ -189,15 +190,20 @@ export class ConfigureFunctions implements INodeType {
 			try {
 				// Since we're in memory mode, we need to temporarily connect to Redis to clear the config
 				const { createClient } = await import("redis")
-				const { getRedisHost } = await import("../FunctionRegistryFactory")
-				const currentHost = getRedisHost()
+				const { getRedisConfig } = await import("../FunctionRegistryFactory")
+				const currentConfig = getRedisConfig()
 				const client = createClient({
-					url: `redis://${currentHost}:6379`,
 					socket: {
+						host: currentConfig.host,
+						port: currentConfig.port,
+						tls: currentConfig.ssl === true,
 						reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 						connectTimeout: 1000,
 						commandTimeout: 1000,
 					},
+					database: currentConfig.database,
+					username: currentConfig.user || undefined,
+					password: currentConfig.password || undefined,
 				})
 
 				await client.connect()
