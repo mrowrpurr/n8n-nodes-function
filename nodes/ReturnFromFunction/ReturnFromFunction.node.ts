@@ -40,7 +40,7 @@ export class ReturnFromFunction implements INodeType {
 		console.log("🌊 ReturnFromFunction: Input items:", items)
 
 		const returnData: INodeExecutionData[] = []
-		const registry = getFunctionRegistry()
+		const registry = await getFunctionRegistry()
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			console.log(`🌊 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)

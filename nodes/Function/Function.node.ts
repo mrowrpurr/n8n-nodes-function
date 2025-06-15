@@ -165,7 +165,7 @@ export class Function implements INodeType {
 		console.log("🌊 Function: Workflow ID:", workflowId)
 		console.log("🌊 Function: Parameter list:", parameterList)
 
-		const registry = getFunctionRegistry()
+		const registry = await getFunctionRegistry()
 
 		// Convert parameter list to ParameterDefinition format
 		const parameterDefinitions: ParameterDefinition[] = parameterList.map((param: any) => ({

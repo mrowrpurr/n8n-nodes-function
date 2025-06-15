@@ -172,7 +172,7 @@ export class CallFunction implements INodeType {
 				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
 				console.log("🔧 CallFunction: Global function mode:", globalFunction)
 
-				const registry = getFunctionRegistry()
+				const registry = await getFunctionRegistry()
 				let availableFunctions
 
 				if (globalFunction) {
@@ -246,7 +246,7 @@ export class CallFunction implements INodeType {
 					return []
 				}
 
-				const registry = getFunctionRegistry()
+				const registry = await getFunctionRegistry()
 				let parameters
 
 				if (globalFunction) {
@@ -400,7 +400,7 @@ export class CallFunction implements INodeType {
 			}
 
 			// Get function parameter definitions for validation
-			const registry = getFunctionRegistry()
+			const registry = await getFunctionRegistry()
 			let functionParameterDefs
 
 			if (globalFunction) {

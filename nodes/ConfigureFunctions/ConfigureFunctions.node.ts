@@ -95,6 +95,30 @@ export class ConfigureFunctions implements INodeType {
 			enableRedisMode(redisConfig.host)
 			console.log("⚙️ ConfigureFunctions: ✅ Redis mode enabled via FunctionRegistryFactory")
 
+			// Store global config in Redis for workers to read
+			try {
+				const registry = await getFunctionRegistry()
+				await registry.testRedisConnection() // Ensure Redis is connected
+
+				// Store global configuration that workers will read
+				const globalConfig = {
+					queueMode: true,
+					redisHost: redisConfig.host,
+					timestamp: new Date().toISOString(),
+				}
+
+				console.log("⚙️ ConfigureFunctions: Storing global config in Redis:", globalConfig)
+
+				// Use the registry's Redis client to store config
+				const client = (registry as any).client
+				if (client) {
+					await client.set("function:global_config", JSON.stringify(globalConfig), { EX: 86400 }) // 24 hour expiry
+					console.log("⚙️ ConfigureFunctions: ✅ Global config stored in Redis")
+				}
+			} catch (error) {
+				console.error("⚙️ ConfigureFunctions: Failed to store global config in Redis:", error)
+			}
+
 			console.log("⚙️ ConfigureFunctions: 🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
 
 			// Test connection if requested
@@ -102,7 +126,7 @@ export class ConfigureFunctions implements INodeType {
 				console.log("⚙️ ConfigureFunctions: Testing Redis connection...")
 				try {
 					// Get the registry and test the connection
-					const registry = getFunctionRegistry()
+					const registry = await getFunctionRegistry()
 					await registry.testRedisConnection()
 					console.log("⚙️ ConfigureFunctions: Redis connection test successful")
 
@@ -158,6 +182,27 @@ export class ConfigureFunctions implements INodeType {
 			// Disable Redis mode using the factory
 			disableRedisMode()
 			console.log("⚙️ ConfigureFunctions: ✅ Redis mode disabled via FunctionRegistryFactory")
+
+			// Try to clear global config from Redis if it exists
+			try {
+				// Since we're in memory mode, we need to temporarily connect to Redis to clear the config
+				const { createClient } = await import("redis")
+				const client = createClient({
+					url: `redis://redis:6379`,
+					socket: {
+						reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+						connectTimeout: 1000,
+						commandTimeout: 1000,
+					},
+				})
+
+				await client.connect()
+				await client.del("function:global_config")
+				await client.disconnect()
+				console.log("⚙️ ConfigureFunctions: ✅ Global config cleared from Redis")
+			} catch (error) {
+				console.log("⚙️ ConfigureFunctions: Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
+			}
 
 			// Emit configuration event
 			this.emit([
