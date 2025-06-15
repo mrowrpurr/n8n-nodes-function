@@ -1,5 +1,5 @@
 import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
-import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
 
 export class ReturnFromFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -64,7 +64,7 @@ export class ReturnFromFunction implements INodeType {
 				  }
 				| undefined
 
-			if (!functionCallData || !functionCallData.responseChannel) {
+			if (!functionCallData) {
 				throw new NodeOperationError(this.getNode(), "ReturnFromFunction must be used within a Function that was called via CallFunction")
 			}
 
@@ -142,29 +142,47 @@ export class ReturnFromFunction implements INodeType {
 
 			console.log("🌊 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
 
-			try {
-				// Publish successful response
-				await registry.publishResponse(callContext.responseChannel, {
-					success: true,
-					data: parsedReturnValue,
-					callId: callContext.callId,
-					timestamp: Date.now(),
-				})
+			// Check if queue mode is enabled to determine how to return the value
+			if (isQueueModeEnabled()) {
+				console.log("🌊 ReturnFromFunction: Queue mode enabled, using Redis streams")
+				try {
+					// Publish successful response
+					await registry.publishResponse(callContext.responseChannel, {
+						success: true,
+						data: parsedReturnValue,
+						callId: callContext.callId,
+						timestamp: Date.now(),
+					})
 
-				console.log("🌊 ReturnFromFunction: ✅ Response published successfully!")
+					console.log("🌊 ReturnFromFunction: ✅ Response published successfully!")
 
-				// Acknowledge the stream message
-				await registry.acknowledgeCall(callContext.streamKey, callContext.groupName, callContext.messageId)
+					// Acknowledge the stream message
+					await registry.acknowledgeCall(callContext.streamKey, callContext.groupName, callContext.messageId)
 
-				console.log("🌊 ReturnFromFunction: ✅ Stream message acknowledged!")
-			} catch (error) {
-				console.error("🌊 ReturnFromFunction: ❌ Error publishing response:", error)
-				throw new NodeOperationError(this.getNode(), `Failed to publish response: ${error.message}`)
+					console.log("🌊 ReturnFromFunction: ✅ Stream message acknowledged!")
+
+					// Pop the current function execution from the stack
+					registry.popCurrentFunctionExecution()
+				} catch (error) {
+					console.error("🌊 ReturnFromFunction: ❌ Error publishing response:", error)
+					throw new NodeOperationError(this.getNode(), `Failed to publish response: ${error.message}`)
+				}
+			} else {
+				console.log("🌊 ReturnFromFunction: Queue mode disabled, using direct return value resolution")
+				try {
+					// Resolve the return value directly for in-memory mode
+					await registry.resolveReturn(callContext.callId, parsedReturnValue)
+					console.log("🌊 ReturnFromFunction: ✅ Return value resolved directly!")
+
+					// Pop the current function execution from the stack
+					registry.popCurrentFunctionExecution()
+				} catch (error) {
+					console.error("🌊 ReturnFromFunction: ❌ Error resolving return value:", error)
+					throw new NodeOperationError(this.getNode(), `Failed to resolve return value: ${error.message}`)
+				}
 			}
 
-			// Call context is embedded in the item, no need to clear static data
-
-			console.log("🌊 ReturnFromFunction: ✅ Call context cleared")
+			console.log("🌊 ReturnFromFunction: ✅ Return value handled successfully")
 
 			// Clean up the result item by removing internal fields
 			const cleanedJson = { ...item.json }

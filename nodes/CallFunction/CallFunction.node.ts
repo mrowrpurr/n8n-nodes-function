@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, getRedisHost } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -274,6 +274,13 @@ export class CallFunction implements INodeType {
 
 					console.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
 					parameters = await registry.getFunctionParameters(functionName, workflowId)
+
+					// Fallback: if no parameters found with specific scope (e.g., workflowId is "unknown" during design-time)
+					// try to get parameters without scope filtering
+					if (parameters.length === 0 && (workflowId === "unknown" || workflowId === "")) {
+						console.log("🔧 CallFunction: No parameters found with scope, trying fallback without scope")
+						parameters = await registry.getFunctionParameters(functionName)
+					}
 				}
 
 				console.log("🔧 CallFunction: Found parameters:", parameters)
@@ -464,9 +471,6 @@ export class CallFunction implements INodeType {
 
 			console.log("🔧 CallFunction: Final parameters =", functionParameters)
 
-			console.log("🌊 CallFunction: Implementing stream-based function call")
-			console.log("🌊 CallFunction: Calling function:", functionName, "with params:", functionParameters)
-
 			// Determine the scope to use based on global function setting
 			let targetScope: string
 			let workflowId: string
@@ -479,140 +483,221 @@ export class CallFunction implements INodeType {
 				targetScope = workflowId
 			}
 
-			console.log("🌊 CallFunction: Target scope =", targetScope)
-			console.log("🌊 CallFunction: Global function =", globalFunction)
+			console.log("🔧 CallFunction: Target scope =", targetScope)
+			console.log("🔧 CallFunction: Global function =", globalFunction)
 
-			// Use the registry instance to call the function via streams
+			// Use the registry instance to call the function
 			const item = items[itemIndex]
 
 			try {
-				// Generate unique call ID
-				const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-				const responseChannel = `function:response:${callId}`
-				const streamKey = `function:stream:${targetScope}:${functionName}`
+				// Check if queue mode is enabled to determine call method
+				if (isQueueModeEnabled()) {
+					console.log("🌊 CallFunction: Queue mode enabled, using Redis streams")
 
-				console.log("🌊 CallFunction: Call ID:", callId)
-				console.log("🌊 CallFunction: Stream key:", streamKey)
-				console.log("🌊 CallFunction: Response channel:", responseChannel)
+					// Generate unique call ID
+					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+					const responseChannel = `function:response:${callId}`
+					const streamKey = `function:stream:${targetScope}:${functionName}`
 
-				// Check if any workers are available for this function
-				const availableWorkers = await registry.getAvailableWorkers(functionName)
+					console.log("🌊 CallFunction: Call ID:", callId)
+					console.log("🌊 CallFunction: Stream key:", streamKey)
+					console.log("🌊 CallFunction: Response channel:", responseChannel)
 
-				if (availableWorkers.length === 0) {
-					throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
-				}
+					// Check if any workers are available for this function
+					const availableWorkers = await registry.getAvailableWorkers(functionName)
 
-				// Filter workers by health check
-				const healthyWorkers = []
-				for (const workerId of availableWorkers) {
-					const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
-					if (isHealthy) {
-						healthyWorkers.push(workerId)
+					if (availableWorkers.length === 0) {
+						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
 					}
-				}
 
-				if (healthyWorkers.length === 0) {
-					throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available`)
-				}
-
-				console.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
-
-				// Check if stream is ready before making the call
-				const groupName = `group:${functionName}`
-				console.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
-
-				const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
-
-				if (!isReady) {
-					console.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
-					// Don't throw error immediately, try the call - it might work if function is just starting
-				} else {
-					console.log("🌊 CallFunction: Stream is ready, proceeding with call")
-				}
-
-				// Add call to stream
-				await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
-
-				console.log("🌊 CallFunction: Call added to stream, waiting for response...")
-
-				// Wait for response with retry logic for the first call
-				let response
-				let retryCount = 0
-				const maxRetries = 2
-				let currentResponseChannel = responseChannel
-
-				while (retryCount <= maxRetries) {
-					try {
-						response = await registry.waitForResponse(currentResponseChannel, 15) // 15 second timeout per attempt
-						break // Success, exit retry loop
-					} catch (error) {
-						retryCount++
-						console.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
-
-						if (retryCount <= maxRetries) {
-							console.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
-							await new Promise((resolve) => setTimeout(resolve, 2000))
-
-							// Generate new call ID for retry
-							const retryCallId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-							const retryResponseChannel = `function:response:${retryCallId}`
-
-							console.log("🌊 CallFunction: Retry call ID:", retryCallId)
-
-							// Add retry call to stream
-							await registry.addCall(streamKey, retryCallId, functionName, functionParameters, item, retryResponseChannel, 30000)
-
-							// Update response channel for this attempt
-							currentResponseChannel = retryResponseChannel
-						} else {
-							throw error // Re-throw the last error if all retries failed
+					// Filter workers by health check
+					const healthyWorkers = []
+					for (const workerId of availableWorkers) {
+						const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
+						if (isHealthy) {
+							healthyWorkers.push(workerId)
 						}
 					}
-				}
 
-				console.log("🌊 CallFunction: Received response:", response)
-
-				if (!response.success) {
-					throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
-				}
-
-				// Start with the original item
-				let resultJson: any = { ...item.json }
-
-				// Add Redis host metadata if it's not the default "redis"
-				const currentRedisHost = getRedisHost()
-				if (currentRedisHost !== "redis") {
-					if (!resultJson._function_call_metadata) {
-						resultJson._function_call_metadata = {}
+					if (healthyWorkers.length === 0) {
+						throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available`)
 					}
-					resultJson._function_call_metadata.redis_host = currentRedisHost
-				}
 
-				// Always include the function result, but how it's stored depends on storeResponse setting
-				if (response.data !== null) {
-					if (storeResponse && responseVariableName && responseVariableName.trim()) {
-						// Store under specific variable name
-						resultJson[responseVariableName] = response.data
+					console.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
+
+					// Check if stream is ready before making the call
+					const groupName = `group:${functionName}`
+					console.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
+
+					const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
+
+					if (!isReady) {
+						console.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
+						// Don't throw error immediately, try the call - it might work if function is just starting
 					} else {
-						// Default behavior: merge the function result directly into the item
-						if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
-							// If result is an object, merge its properties
-							resultJson = { ...resultJson, ...response.data }
-						} else {
-							// If result is not an object, store under 'result' key
-							resultJson.result = response.data
+						console.log("🌊 CallFunction: Stream is ready, proceeding with call")
+					}
+
+					// Add call to stream
+					await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
+
+					console.log("🌊 CallFunction: Call added to stream, waiting for response...")
+
+					// Wait for response with retry logic for the first call
+					let response
+					let retryCount = 0
+					const maxRetries = 2
+					let currentResponseChannel = responseChannel
+
+					while (retryCount <= maxRetries) {
+						try {
+							response = await registry.waitForResponse(currentResponseChannel, 15) // 15 second timeout per attempt
+							break // Success, exit retry loop
+						} catch (error) {
+							retryCount++
+							console.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
+
+							if (retryCount <= maxRetries) {
+								console.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
+								await new Promise((resolve) => setTimeout(resolve, 2000))
+
+								// Generate new call ID for retry
+								const retryCallId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+								const retryResponseChannel = `function:response:${retryCallId}`
+
+								console.log("🌊 CallFunction: Retry call ID:", retryCallId)
+
+								// Add retry call to stream
+								await registry.addCall(streamKey, retryCallId, functionName, functionParameters, item, retryResponseChannel, 30000)
+
+								// Update response channel for this attempt
+								currentResponseChannel = retryResponseChannel
+							} else {
+								throw error // Re-throw the last error if all retries failed
+							}
 						}
 					}
-				}
 
-				const resultItem: INodeExecutionData = {
-					json: resultJson,
-					index: itemIndex,
-					binary: item.binary,
-				}
+					console.log("🌊 CallFunction: Received response:", response)
 
-				console.log("🌊 CallFunction: Created result item =", resultItem)
-				returnData.push(resultItem)
+					if (!response.success) {
+						throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
+					}
+
+					// Start with the original item
+					let resultJson: any = { ...item.json }
+
+					// Add Redis host metadata if it's not the default "redis"
+					const currentRedisHost = getRedisHost()
+					if (currentRedisHost !== "redis") {
+						if (!resultJson._function_call_metadata) {
+							resultJson._function_call_metadata = {}
+						}
+						resultJson._function_call_metadata.redis_host = currentRedisHost
+					}
+
+					// Always include the function result, but how it's stored depends on storeResponse setting
+					if (response.data !== null) {
+						if (storeResponse && responseVariableName && responseVariableName.trim()) {
+							// Store under specific variable name
+							resultJson[responseVariableName] = response.data
+						} else {
+							// Default behavior: merge the function result directly into the item
+							if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
+								// If result is an object, merge its properties
+								resultJson = { ...resultJson, ...response.data }
+							} else {
+								// If result is not an object, store under 'result' key
+								resultJson.result = response.data
+							}
+						}
+					}
+
+					const resultItem: INodeExecutionData = {
+						json: resultJson,
+						index: itemIndex,
+						binary: item.binary,
+					}
+
+					console.log("🌊 CallFunction: Created result item =", resultItem)
+					returnData.push(resultItem)
+				} else {
+					console.log("🔧 CallFunction: Queue mode disabled, using direct in-memory call")
+
+					// Call function directly via registry
+					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
+
+					if (!callResult.result) {
+						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
+					}
+
+					console.log("🔧 CallFunction: Direct call result:", callResult.result)
+
+					// Process the result - callResult.result is an array of INodeExecutionData
+					for (const resultItem of callResult.result) {
+						// Check if function returned a value via ReturnFromFunction node
+						console.log("🔧 CallFunction: About to check for return value...")
+
+						// Extract the callId from the _functionCall metadata in the result
+						let returnValueKey = callResult.actualExecutionId
+						if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
+							const functionCallData = resultItem.json._functionCall as any
+							if (functionCallData.callId) {
+								returnValueKey = functionCallData.callId
+								console.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
+							} else {
+								console.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
+							}
+						} else {
+							console.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
+						}
+
+						const returnValue = await registry.getFunctionReturnValue(returnValueKey)
+						console.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+
+						let finalReturnValue = resultItem.json
+
+						// Clear the return value from registry after retrieving it
+						if (returnValue !== null) {
+							console.log("🔧 CallFunction: Clearing return value from registry...")
+							await registry.clearFunctionReturnValue(returnValueKey)
+							console.log("🔧 CallFunction: Return value cleared")
+							finalReturnValue = returnValue
+						} else {
+							// Clean up any _functionCall metadata from the result
+							const cleanedJson = { ...resultItem.json }
+							delete cleanedJson._functionCall
+							finalReturnValue = cleanedJson
+						}
+
+						// Start with the original item
+						let resultJson: any = { ...item.json }
+
+						// Store response if requested
+						if (storeResponse && responseVariableName && responseVariableName.trim()) {
+							// Store under specific variable name
+							resultJson[responseVariableName] = finalReturnValue
+						} else {
+							// Default behavior: merge the function result directly into the item
+							if (typeof finalReturnValue === "object" && finalReturnValue !== null && !Array.isArray(finalReturnValue)) {
+								// If result is an object, merge its properties
+								resultJson = { ...resultJson, ...finalReturnValue }
+							} else {
+								// If result is not an object, store under 'result' key
+								resultJson.result = finalReturnValue
+							}
+						}
+
+						const finalResultItem: INodeExecutionData = {
+							json: resultJson,
+							index: itemIndex,
+							binary: resultItem.binary || item.binary,
+						}
+
+						console.log("🔧 CallFunction: Created result item =", finalResultItem)
+						returnData.push(finalResultItem)
+					}
+				}
 			} catch (error) {
 				console.error("🔧 CallFunction: Error calling function:", error)
 

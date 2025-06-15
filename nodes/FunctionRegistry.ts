@@ -39,6 +39,7 @@ class FunctionRegistry {
 	private nextCallId: number = 1
 	private callContextStack: string[] = []
 	private returnPromises: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map()
+	private inMemoryReturnValues: Map<string, any> = new Map()
 	private redisHost: string = "redis"
 	private redisPort: number = 6379
 	private isConnected: boolean = false
@@ -831,7 +832,9 @@ class FunctionRegistry {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ SETTING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis return value storage`)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, storing return value in memory`)
+			this.inMemoryReturnValues.set(executionId, returnValue)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Return value stored in memory: ${executionId}`)
 			return
 		}
 
@@ -855,8 +858,15 @@ class FunctionRegistry {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 GETTING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, no return value available`)
-			return null
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, checking in-memory return values`)
+			const returnValue = this.inMemoryReturnValues.get(executionId)
+			if (returnValue !== undefined) {
+				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 Return value found in memory:`, returnValue)
+				return returnValue
+			} else {
+				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 No return value found in memory`)
+				return null
+			}
 		}
 
 		try {
@@ -883,7 +893,9 @@ class FunctionRegistry {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ CLEARING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis return value cleanup`)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, clearing in-memory return value`)
+			const wasDeleted = this.inMemoryReturnValues.delete(executionId)
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ Return value cleared from memory: ${wasDeleted}`)
 			return
 		}
 

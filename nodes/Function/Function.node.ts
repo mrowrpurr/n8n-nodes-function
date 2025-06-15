@@ -482,11 +482,30 @@ export class Function implements INodeType {
 					locals[paramName] = value
 				}
 
+				// Generate a call ID for in-memory mode to track return values
+				const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+				// Push current function execution context for ReturnFromFunction nodes
+				registry.pushCurrentFunctionExecution(callId)
+
+				// Clear any existing return value for this execution
+				registry.clearFunctionReturnValue(callId)
+
 				// Create the output item
 				let outputItem: INodeExecutionData = {
 					json: {
 						...inputItem.json,
 						...locals,
+						_functionCall: {
+							callId,
+							functionName,
+							timestamp: Date.now(),
+							// For in-memory mode, we don't need Redis-specific fields
+							responseChannel: null,
+							messageId: null,
+							streamKey: null,
+							groupName: null,
+						},
 					},
 					index: 0,
 					binary: inputItem.binary,
@@ -549,6 +568,50 @@ export class Function implements INodeType {
 						}
 					}
 				}
+
+				console.log("🌊 Function: Emitting output item to downstream nodes")
+				this.emit([[outputItem]])
+
+				// Use promise-based return handling like the reference implementation
+				console.log("🌊 Function: Setting up promise-based return handling...")
+
+				// Create a return promise for this execution
+				const returnPromise = registry.createReturnPromise(callId)
+				console.log("🌊 Function: Return promise created")
+
+				// Wait briefly to detect if this is a void function
+				console.log("🌊 Function: Checking if this is a void function...")
+				const voidDetectionTimeout = 50 // 50ms to detect void functions
+				let returnValue = null
+
+				try {
+					// Race between the return promise and a timeout for void function detection
+					returnValue = await Promise.race([
+						returnPromise,
+						new Promise<null>((resolve) => {
+							setTimeout(() => {
+								console.log("🌊 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
+								console.log("🌊 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
+								resolve(null)
+							}, voidDetectionTimeout)
+						}),
+					])
+
+					// If we got null from the timeout, this is a void function
+					if (returnValue === null) {
+						console.log("🌊 Function: 🟡 Completing immediately for void function")
+						registry.cleanupReturnPromise(callId)
+					} else {
+						console.log("🌊 Function: ✅ Return value received via promise:", returnValue)
+					}
+				} catch (error) {
+					console.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
+					registry.cleanupReturnPromise(callId)
+					// For errors, we'll still complete the function
+					returnValue = null
+				}
+
+				console.log("🌊 Function: Function execution completed, final return value:", returnValue)
 
 				return [outputItem]
 			})
