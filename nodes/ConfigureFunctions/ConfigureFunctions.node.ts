@@ -56,6 +56,30 @@ export class ConfigureFunctions implements INodeType {
 		resetGlobalConfig()
 		logger.debug("Global configuration state reset")
 
+		// Clear any existing global config from Redis to prevent stale config
+		// Use default connection parameters to avoid chicken-and-egg problem
+		try {
+			const { createClient } = await import("redis")
+			const client = createClient({
+				socket: {
+					host: "redis",
+					port: 6379,
+					tls: false,
+					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
+					connectTimeout: 1000,
+					commandTimeout: 1000,
+				},
+				database: 0,
+			})
+
+			await client.connect()
+			await client.del("function:global_config")
+			await client.disconnect()
+			logger.debug("✅ Cleared existing global config from Redis using default connection")
+		} catch (error) {
+			logger.debug("Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
+		}
+
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
