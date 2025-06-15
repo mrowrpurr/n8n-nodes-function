@@ -177,6 +177,10 @@ class FunctionRegistry {
 							if (callerExecutionId) {
 								this.pushCurrentFunctionExecution(callerExecutionId)
 								await this.clearFunctionReturnValue(callerExecutionId)
+
+								// Store execution context in Redis for cross-worker coordination
+								await this.redisClient!.set(`execution:context:${callId}`, callerExecutionId, { EX: 300 }) // 5 minute expiry
+								console.log(`🔔 FunctionRegistry: Stored execution context in Redis: ${callId} -> ${callerExecutionId}`)
 							}
 
 							const result = await listener.callback(callParams, inputItem)
@@ -451,46 +455,103 @@ class FunctionRegistry {
 		return []
 	}
 
-	setFunctionReturnValue(executionId: string, returnValue: any): void {
+	async setFunctionReturnValue(executionId: string, returnValue: any): Promise<void> {
 		console.log("🎯 FunctionRegistry: ⭐ SETTING return value for execution:", executionId)
-		console.log("🎯 FunctionRegistry: ⭐ Return value being stored:", returnValue)
-		console.log("🎯 FunctionRegistry: ⭐ Return value type:", typeof returnValue)
-		console.log("🎯 FunctionRegistry: ⭐ Registry size before:", this.returnValues.size)
 
-		this.returnValues.set(executionId, returnValue)
+		if (USE_REDIS) {
+			try {
+				await this.ensureRedisConnection()
+				if (!this.redisClient) throw new Error("Redis client not available")
 
-		console.log("🎯 FunctionRegistry: ⭐ Registry size after:", this.returnValues.size)
-		console.log("🎯 FunctionRegistry: ⭐ Return value stored successfully!")
+				const redisKey = `return:${executionId}`
+				await this.redisClient.set(redisKey, JSON.stringify(returnValue), { EX: 300 }) // 5 minute expiry
+				console.log("🎯 FunctionRegistry: ⭐ Return value stored in Redis:", redisKey)
 
-		// Verify it was stored
-		const verification = this.returnValues.get(executionId)
-		console.log("🎯 FunctionRegistry: ⭐ Verification - can retrieve:", verification)
+				// Publish to notify waiting processes
+				await this.redisClient.publish(`return-pubsub:${executionId}`, JSON.stringify(returnValue))
+				console.log("🎯 FunctionRegistry: ⭐ Return value published to pubsub")
+			} catch (error) {
+				console.error("🎯 FunctionRegistry: Failed to store return value in Redis:", error)
+			}
+		} else {
+			// Fallback to in-memory storage
+			console.log("🎯 FunctionRegistry: ⭐ Return value being stored:", returnValue)
+			console.log("🎯 FunctionRegistry: ⭐ Return value type:", typeof returnValue)
+			console.log("🎯 FunctionRegistry: ⭐ Registry size before:", this.returnValues.size)
+
+			this.returnValues.set(executionId, returnValue)
+
+			console.log("🎯 FunctionRegistry: ⭐ Registry size after:", this.returnValues.size)
+			console.log("🎯 FunctionRegistry: ⭐ Return value stored successfully!")
+
+			// Verify it was stored
+			const verification = this.returnValues.get(executionId)
+			console.log("🎯 FunctionRegistry: ⭐ Verification - can retrieve:", verification)
+		}
 	}
 
-	getFunctionReturnValue(executionId: string): any | null {
+	async getFunctionReturnValue(executionId: string): Promise<any | null> {
 		console.log("🎯 FunctionRegistry: 🔍 GETTING return value for execution:", executionId)
-		console.log("🎯 FunctionRegistry: 🔍 Registry size:", this.returnValues.size)
-		console.log("🎯 FunctionRegistry: 🔍 All keys in registry:", Array.from(this.returnValues.keys()))
 
-		const returnValue = this.returnValues.get(executionId)
-		console.log("🎯 FunctionRegistry: 🔍 Raw value from map:", returnValue)
-		console.log("🎯 FunctionRegistry: 🔍 Value type:", typeof returnValue)
-		console.log("🎯 FunctionRegistry: 🔍 Value === undefined?", returnValue === undefined)
+		if (USE_REDIS) {
+			try {
+				await this.ensureRedisConnection()
+				if (!this.redisClient) throw new Error("Redis client not available")
 
-		const result = returnValue || null
-		console.log("🎯 FunctionRegistry: 🔍 Final result (with null fallback):", result)
-		return result
+				const redisKey = `return:${executionId}`
+				const returnValueJson = await this.redisClient.get(redisKey)
+
+				if (returnValueJson) {
+					const returnValue = JSON.parse(returnValueJson)
+					console.log("🎯 FunctionRegistry: 🔍 Return value found in Redis:", returnValue)
+					return returnValue
+				}
+			} catch (error) {
+				console.error("🎯 FunctionRegistry: Error getting return value from Redis:", error)
+			}
+
+			console.log("🎯 FunctionRegistry: 🔍 No return value found in Redis")
+			return null
+		} else {
+			// Fallback to in-memory storage
+			console.log("🎯 FunctionRegistry: 🔍 Registry size:", this.returnValues.size)
+			console.log("🎯 FunctionRegistry: 🔍 All keys in registry:", Array.from(this.returnValues.keys()))
+
+			const returnValue = this.returnValues.get(executionId)
+			console.log("🎯 FunctionRegistry: 🔍 Raw value from map:", returnValue)
+			console.log("🎯 FunctionRegistry: 🔍 Value type:", typeof returnValue)
+			console.log("🎯 FunctionRegistry: 🔍 Value === undefined?", returnValue === undefined)
+
+			const result = returnValue || null
+			console.log("🎯 FunctionRegistry: 🔍 Final result (with null fallback):", result)
+			return result
+		}
 	}
 
-	clearFunctionReturnValue(executionId: string): void {
+	async clearFunctionReturnValue(executionId: string): Promise<void> {
 		console.log("🎯 FunctionRegistry: 🗑️  CLEARING return value for execution:", executionId)
-		console.log("🎯 FunctionRegistry: 🗑️  Registry size before:", this.returnValues.size)
 
-		const existed = this.returnValues.has(executionId)
-		this.returnValues.delete(executionId)
+		if (USE_REDIS) {
+			try {
+				await this.ensureRedisConnection()
+				if (!this.redisClient) throw new Error("Redis client not available")
 
-		console.log("🎯 FunctionRegistry: 🗑️  Value existed?", existed)
-		console.log("🎯 FunctionRegistry: 🗑️  Registry size after:", this.returnValues.size)
+				const redisKey = `return:${executionId}`
+				await this.redisClient.del(redisKey)
+				console.log("🎯 FunctionRegistry: 🗑️  Return value cleared from Redis")
+			} catch (error) {
+				console.error("🎯 FunctionRegistry: Error clearing return value from Redis:", error)
+			}
+		} else {
+			// Fallback to in-memory storage
+			console.log("🎯 FunctionRegistry: 🗑️  Registry size before:", this.returnValues.size)
+
+			const existed = this.returnValues.has(executionId)
+			this.returnValues.delete(executionId)
+
+			console.log("🎯 FunctionRegistry: 🗑️  Value existed?", existed)
+			console.log("🎯 FunctionRegistry: 🗑️  Registry size after:", this.returnValues.size)
+		}
 	}
 
 	pushCurrentFunctionExecution(executionId: string): void {
@@ -587,11 +648,11 @@ class FunctionRegistry {
 		})
 	}
 
-	resolveReturn(executionId: string, value: any): void {
+	async resolveReturn(executionId: string, value: any): Promise<void> {
 		console.log("🎯 FunctionRegistry: ✅ Resolving return promise for execution:", executionId, "with value:", value)
 
-		// Store the value (for compatibility with existing getFunctionReturnValue calls)
-		this.returnValues.set(executionId, value)
+		// Store the value using the new async method
+		await this.setFunctionReturnValue(executionId, value)
 
 		// Resolve the promise if it exists
 		const promiseHandlers = this.returnPromises.get(executionId)

@@ -241,6 +241,9 @@ export class Function implements INodeType {
 			let outputItem: INodeExecutionData = {
 				json: {
 					...inputItem.json,
+					// Pass execution context info for ReturnFromFunction to use
+					_functionCallId: functionParameters._functionCall?.callId,
+					_functionExecutionId: currentExecutionId,
 				},
 				index: 0,
 				binary: inputItem.binary,
@@ -335,9 +338,12 @@ export class Function implements INodeType {
 			const returnPromise = registry.createReturnPromise(currentExecutionId)
 			console.log("🎯 Function: Return promise created")
 
-			// Wait briefly to detect if this is a void function
+			// Wait to detect if this is a void function
+			// Use longer timeout for cross-process calls (Redis pub/sub)
 			console.log("🎯 Function: Checking if this is a void function...")
-			const voidDetectionTimeout = 50 // 50ms to detect void functions
+			const isRedisCall = currentFunctionExecution !== null // We're in a Redis pub/sub call if there's a function execution on stack
+			const voidDetectionTimeout = isRedisCall ? 5000 : 50 // 5 seconds for Redis calls, 50ms for local calls
+			console.log("🎯 Function: Using timeout:", voidDetectionTimeout, "ms (Redis call:", isRedisCall, ")")
 			let returnValue = null
 
 			try {

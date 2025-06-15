@@ -112,15 +112,35 @@ export class ReturnFromFunction implements INodeType {
 				// Continue with normal flow to clean up the stack
 			}
 
-			console.log("🔴 ReturnFromFunction: Final return value =", parsedReturnValue)
+			// Clean up the return value by removing internal fields
+			if (parsedReturnValue && typeof parsedReturnValue === "object") {
+				const cleanedReturnValue = { ...parsedReturnValue }
+				delete cleanedReturnValue._functionCallId
+				delete cleanedReturnValue._functionExecutionId
+				parsedReturnValue = cleanedReturnValue
+			}
+
+			console.log("🔴 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
 
 			// Get execution ID from the registry (set by the Function node)
 			const registry = getFunctionRegistry()
 			console.log("🔴 ReturnFromFunction: Getting current function execution from registry...")
 
-			const functionExecutionId = registry.getCurrentFunctionExecution()
+			let functionExecutionId = registry.getCurrentFunctionExecution()
 			console.log("🔴 ReturnFromFunction: Function execution ID from registry:", functionExecutionId)
 			console.log("🔴 ReturnFromFunction: Raw execution ID from this context:", this.getExecutionId())
+
+			// Check if we have function call context info in the item
+			const functionCallId = item.json._functionCallId
+			const functionExecutionIdFromItem = item.json._functionExecutionId
+			console.log("🔴 ReturnFromFunction: Function call ID from item:", functionCallId)
+			console.log("🔴 ReturnFromFunction: Function execution ID from item:", functionExecutionIdFromItem)
+
+			// If we have function context from the item, use that (for cross-worker coordination)
+			if (functionExecutionIdFromItem && !functionExecutionId) {
+				functionExecutionId = String(functionExecutionIdFromItem)
+				console.log("🔴 ReturnFromFunction: Using function execution ID from item for cross-worker coordination:", functionExecutionId)
+			}
 
 			if (!functionExecutionId) {
 				console.warn("🔴 ReturnFromFunction: ⚠️  NO CURRENT FUNCTION EXECUTION FOUND!")
@@ -158,9 +178,13 @@ export class ReturnFromFunction implements INodeType {
 				console.log("🔴 ReturnFromFunction: ⚠️  No function execution ID to pop from stack")
 			}
 
-			// Pass through the item unchanged (no more internal fields to clean)
+			// Clean up the result item by removing internal fields
+			const cleanedJson = { ...item.json }
+			delete cleanedJson._functionCallId
+			delete cleanedJson._functionExecutionId
+
 			const resultItem: INodeExecutionData = {
-				json: item.json,
+				json: cleanedJson,
 				index: itemIndex,
 				binary: item.binary,
 			}
