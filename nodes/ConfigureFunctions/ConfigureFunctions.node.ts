@@ -1,6 +1,6 @@
 import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
-import { disableRedisMode, getFunctionRegistry, setRedisConfig, setQueueMode } from "../FunctionRegistryFactory"
+import { disableRedisMode, getFunctionRegistry, setRedisConfig, setQueueMode, resetGlobalConfig } from "../FunctionRegistryFactory"
 import { configureFunctionsLogger as logger } from "../Logger"
 
 export class ConfigureFunctions implements INodeType {
@@ -51,6 +51,10 @@ export class ConfigureFunctions implements INodeType {
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		logger.info("===== STARTING GLOBAL CONFIGURATION =====")
 		logger.debug("Node execution started")
+
+		// Reset any cached global configuration to ensure fresh start
+		resetGlobalConfig()
+		logger.debug("Global configuration state reset")
 
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean

@@ -72,6 +72,13 @@ export function isQueueModeEnabled(): boolean {
 	return queueModeEnabled
 }
 
+export function resetGlobalConfig(): void {
+	logger.info("Resetting global configuration state")
+	globalConfigLoaded = false
+	redisConfigOverride = null
+	queueModeEnabled = false
+}
+
 // Load global configuration from Redis synchronously on first access
 async function loadGlobalConfigAsync(): Promise<void> {
 	if (globalConfigLoaded) {
@@ -184,5 +191,6 @@ export function enableRedisMode(host: string = "redis"): void {
 // Convenience function to disable Redis mode
 export function disableRedisMode(): void {
 	logger.info("Disabling Redis mode")
+	resetGlobalConfig()
 	setQueueMode(false)
 }
