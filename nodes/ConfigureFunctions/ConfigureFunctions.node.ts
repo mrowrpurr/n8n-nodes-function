@@ -22,11 +22,6 @@ export class ConfigureFunctions implements INodeType {
 			{
 				name: FUNCTIONS_REDIS_INFO.credentialsName,
 				required: false,
-				displayOptions: {
-					show: {
-						useRedis: [true],
-					},
-				},
 			},
 		],
 		properties: [
