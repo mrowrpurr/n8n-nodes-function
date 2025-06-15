@@ -7,7 +7,7 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { getFunctionRegistry, enableRedisMode, getRedisHost } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, enableRedisMode, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { type ParameterDefinition } from "../FunctionRegistry"
 
 export class Function implements INodeType {
@@ -176,144 +176,148 @@ export class Function implements INodeType {
 			description: param.description,
 		}))
 
-		// Create stream and register function metadata
-		const streamKey = await registry.createStream(functionName, scope)
-		const groupName = `group:${functionName}`
-		const consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
+		// Check if queue mode is enabled for Redis operations
+		if (isQueueModeEnabled()) {
+			console.log("🌊 Function: Queue mode enabled, setting up Redis streams")
 
-		// Store function metadata in Redis
-		await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [])
+			// Create stream and register function metadata
+			const streamKey = await registry.createStream(functionName, scope)
+			const groupName = `group:${functionName}`
+			const consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-		// Start heartbeat
-		registry.startHeartbeat(functionName, scope)
+			// Store function metadata in Redis
+			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [])
 
-		console.log("🌊 Function: Stream created and function registered, starting consumer loop")
+			// Start heartbeat
+			registry.startHeartbeat(functionName, scope)
 
-		// Start the stream consumer loop
-		let isActive = true
-		const processStreamMessages = async () => {
-			while (isActive) {
-				try {
-					// Read messages from stream (blocking for 1 second)
-					const messages = await registry.readCalls(streamKey, groupName, consumerName, 1, 1000)
+			console.log("🌊 Function: Stream created and function registered, starting consumer loop")
 
-					for (const message of messages) {
-						if (!isActive) break
+			// Start the stream consumer loop
+			let isActive = true
+			const processStreamMessages = async () => {
+				while (isActive) {
+					try {
+						// Read messages from stream (blocking for 1 second)
+						const messages = await registry.readCalls(streamKey, groupName, consumerName, 1, 1000)
 
-						try {
-							console.log("🌊 Function: Processing stream message:", message.id)
+						for (const message of messages) {
+							if (!isActive) break
 
-							// Parse message fields
-							const callId = message.message.callId
-							const params = JSON.parse(message.message.params)
-							const inputItem = JSON.parse(message.message.inputItem)
-							const responseChannel = message.message.responseChannel
+							try {
+								console.log("🌊 Function: Processing stream message:", message.id)
 
-							console.log("🌊 Function: Call ID:", callId)
-							console.log("🌊 Function: Parameters:", params)
+								// Parse message fields
+								const callId = message.message.callId
+								const params = JSON.parse(message.message.params)
+								const inputItem = JSON.parse(message.message.inputItem)
+								const responseChannel = message.message.responseChannel
 
-							// Check for Redis host metadata and reconfigure if needed
-							if (inputItem.json && inputItem.json._function_call_metadata && inputItem.json._function_call_metadata.redis_host) {
-								const metadataRedisHost = inputItem.json._function_call_metadata.redis_host
-								const currentRedisHost = getRedisHost()
+								console.log("🌊 Function: Call ID:", callId)
+								console.log("🌊 Function: Parameters:", params)
 
-								if (metadataRedisHost !== currentRedisHost) {
-									console.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
-									enableRedisMode(metadataRedisHost)
+								// Check for Redis host metadata and reconfigure if needed
+								if (inputItem.json && inputItem.json._function_call_metadata && inputItem.json._function_call_metadata.redis_host) {
+									const metadataRedisHost = inputItem.json._function_call_metadata.redis_host
+									const currentRedisHost = getRedisHost()
+
+									if (metadataRedisHost !== currentRedisHost) {
+										console.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
+										enableRedisMode(metadataRedisHost)
+									}
+
+									// Clean up the metadata so it doesn't pollute downstream nodes
+									delete inputItem.json._function_call_metadata
 								}
 
-								// Clean up the metadata so it doesn't pollute downstream nodes
-								delete inputItem.json._function_call_metadata
-							}
+								// Note: We'll embed the call context in the output item instead of static data
+								// since static data doesn't transfer between workers in queue mode
 
-							// Note: We'll embed the call context in the output item instead of static data
-							// since static data doesn't transfer between workers in queue mode
+								// Process parameters according to function definition
+								const locals: Record<string, any> = {}
 
-							// Process parameters according to function definition
-							const locals: Record<string, any> = {}
+								for (const param of parameterList) {
+									const paramName = param.name
+									const paramType = param.type
+									const required = param.required
+									const defaultValue = param.defaultValue
 
-							for (const param of parameterList) {
-								const paramName = param.name
-								const paramType = param.type
-								const required = param.required
-								const defaultValue = param.defaultValue
+									let value = params[paramName]
+									console.log("🌊 Function: Processing parameter", paramName, "=", value)
 
-								let value = params[paramName]
-								console.log("🌊 Function: Processing parameter", paramName, "=", value)
+									// Handle required parameters
+									if (required && (value === undefined || value === null)) {
+										throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+									}
 
-								// Handle required parameters
-								if (required && (value === undefined || value === null)) {
-									throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-								}
-
-								// Use default value if not provided
-								if (value === undefined || value === null) {
-									if (defaultValue !== "") {
-										try {
-											// Try to parse default value based on type
-											switch (paramType) {
-												case "number":
-													value = Number(defaultValue)
-													break
-												case "boolean":
-													value = defaultValue.toLowerCase() === "true"
-													break
-												case "object":
-												case "array":
-													value = JSON.parse(defaultValue)
-													break
-												default:
-													value = defaultValue
+									// Use default value if not provided
+									if (value === undefined || value === null) {
+										if (defaultValue !== "") {
+											try {
+												// Try to parse default value based on type
+												switch (paramType) {
+													case "number":
+														value = Number(defaultValue)
+														break
+													case "boolean":
+														value = defaultValue.toLowerCase() === "true"
+														break
+													case "object":
+													case "array":
+														value = JSON.parse(defaultValue)
+														break
+													default:
+														value = defaultValue
+												}
+											} catch (error) {
+												value = defaultValue // Fall back to string if parsing fails
 											}
-										} catch (error) {
-											value = defaultValue // Fall back to string if parsing fails
 										}
 									}
+
+									locals[paramName] = value
 								}
 
-								locals[paramName] = value
-							}
+								console.log("🌊 Function: Final locals =", locals)
 
-							console.log("🌊 Function: Final locals =", locals)
-
-							// Create the output item
-							let outputItem: INodeExecutionData = {
-								json: {
-									...inputItem.json,
-									...locals,
-									_functionCall: {
-										callId,
-										functionName,
-										timestamp: Date.now(),
-										// Embed call context for ReturnFromFunction
-										responseChannel,
-										messageId: message.id,
-										streamKey,
-										groupName,
-									},
-								},
-								index: 0,
-								binary: inputItem.binary,
-							}
-
-							// Execute user code if enabled
-							if (enableCode && code.trim()) {
-								console.log("🌊 Function: Executing JavaScript code")
-
-								try {
-									// Execute JavaScript code with parameters as global variables
-									const context = {
+								// Create the output item
+								let outputItem: INodeExecutionData = {
+									json: {
+										...inputItem.json,
 										...locals,
-										item: outputItem.json,
-										console: {
-											log: (...args: any[]) => console.log("🌊 Function Code:", ...args),
-											error: (...args: any[]) => console.error("🌊 Function Code:", ...args),
-											warn: (...args: any[]) => console.warn("🌊 Function Code:", ...args),
+										_functionCall: {
+											callId,
+											functionName,
+											timestamp: Date.now(),
+											// Embed call context for ReturnFromFunction
+											responseChannel,
+											messageId: message.id,
+											streamKey,
+											groupName,
 										},
-									}
+									},
+									index: 0,
+									binary: inputItem.binary,
+								}
 
-									// Execute JavaScript code directly (n8n already provides sandboxing)
-									const wrappedCode = `
+								// Execute user code if enabled
+								if (enableCode && code.trim()) {
+									console.log("🌊 Function: Executing JavaScript code")
+
+									try {
+										// Execute JavaScript code with parameters as global variables
+										const context = {
+											...locals,
+											item: outputItem.json,
+											console: {
+												log: (...args: any[]) => console.log("🌊 Function Code:", ...args),
+												error: (...args: any[]) => console.error("🌊 Function Code:", ...args),
+												warn: (...args: any[]) => console.warn("🌊 Function Code:", ...args),
+											},
+										}
+
+										// Execute JavaScript code directly (n8n already provides sandboxing)
+										const wrappedCode = `
 										(function() {
 											// Set up context variables
 											${Object.keys(context)
@@ -325,107 +329,251 @@ export class Function implements INodeType {
 										})
 									`
 
-									const result = eval(wrappedCode)(context)
+										const result = eval(wrappedCode)(context)
 
-									console.log("🌊 Function: Code execution result =", result)
+										console.log("🌊 Function: Code execution result =", result)
 
-									// If code returns a value, merge it with locals
-									if (result !== undefined) {
-										if (typeof result === "object" && result !== null) {
-											// Merge locals (parameters) first, then returned object (returned object wins conflicts)
-											outputItem.json = {
-												...outputItem.json,
-												...result,
-											}
-										} else {
-											// For non-object returns, include the result
-											outputItem.json = {
-												...outputItem.json,
-												result,
+										// If code returns a value, merge it with locals
+										if (result !== undefined) {
+											if (typeof result === "object" && result !== null) {
+												// Merge locals (parameters) first, then returned object (returned object wins conflicts)
+												outputItem.json = {
+													...outputItem.json,
+													...result,
+												}
+											} else {
+												// For non-object returns, include the result
+												outputItem.json = {
+													...outputItem.json,
+													result,
+												}
 											}
 										}
-									}
-								} catch (error) {
-									console.error("🌊 Function: Code execution error:", error)
-									outputItem.json = {
-										...outputItem.json,
-										_codeError: error.message,
+									} catch (error) {
+										console.error("🌊 Function: Code execution error:", error)
+										outputItem.json = {
+											...outputItem.json,
+											_codeError: error.message,
+										}
 									}
 								}
+
+								console.log("🌊 Function: Emitting output item:", outputItem)
+
+								// Emit the item to continue the workflow
+								this.emit([[outputItem]])
+							} catch (error) {
+								console.error("🌊 Function: Error processing message:", error)
+
+								// Send error response
+								try {
+									const callId = message.message.callId
+									const responseChannel = message.message.responseChannel
+
+									await registry.publishResponse(responseChannel, {
+										success: false,
+										error: error.message,
+										callId,
+										timestamp: Date.now(),
+									})
+
+									// Acknowledge the message even on error to prevent reprocessing
+									await registry.acknowledgeCall(streamKey, groupName, message.id)
+								} catch (responseError) {
+									console.error("🌊 Function: Error sending error response:", responseError)
+								}
 							}
+						}
+					} catch (error) {
+						console.error("🌊 Function: Error reading from stream:", error)
+						// Wait a bit before retrying
+						await new Promise((resolve) => setTimeout(resolve, 1000))
+					}
+				}
 
-							console.log("🌊 Function: Emitting output item:", outputItem)
+				console.log("🌊 Function: Consumer loop ended")
+			}
 
-							// Emit the item to continue the workflow
-							this.emit([[outputItem]])
-						} catch (error) {
-							console.error("🌊 Function: Error processing message:", error)
+			// Start the consumer loop
+			processStreamMessages().catch((error) => {
+				console.error("🌊 Function: Fatal error in stream consumer:", error)
+			})
 
-							// Send error response
+			console.log("🌊 Function: Function registered successfully, starting stream consumer")
+
+			// Return trigger response with cleanup for queue mode
+			return {
+				closeFunction: async () => {
+					console.log("🌊 Function: Trigger closing, cleaning up")
+
+					// Stop the consumer loop
+					isActive = false
+
+					// Stop heartbeat
+					registry.stopHeartbeat(functionName, scope)
+
+					// Unregister function
+					await registry.unregisterFunction(functionName, scope)
+
+					// Clean up stream
+					await registry.cleanupStream(streamKey, groupName)
+				},
+				// Emit initial trigger data to activate the workflow
+				manualTriggerFunction: async () => {
+					const triggerData: INodeExecutionData = {
+						json: {
+							functionName,
+							registered: true,
+							scope,
+							timestamp: new Date().toISOString(),
+						},
+					}
+					this.emit([[triggerData]])
+				},
+			}
+		} else {
+			console.log("🌊 Function: Queue mode disabled, using in-memory registration")
+
+			// Register function in memory only
+			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
+				console.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
+
+				// Process parameters according to function definition
+				const locals: Record<string, any> = {}
+
+				for (const param of parameterList) {
+					const paramName = param.name
+					const paramType = param.type
+					const required = param.required
+					const defaultValue = param.defaultValue
+
+					let value = parameters[paramName]
+
+					// Handle required parameters
+					if (required && (value === undefined || value === null)) {
+						throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+					}
+
+					// Use default value if not provided
+					if (value === undefined || value === null) {
+						if (defaultValue !== "") {
 							try {
-								const callId = message.message.callId
-								const responseChannel = message.message.responseChannel
-
-								await registry.publishResponse(responseChannel, {
-									success: false,
-									error: error.message,
-									callId,
-									timestamp: Date.now(),
-								})
-
-								// Acknowledge the message even on error to prevent reprocessing
-								await registry.acknowledgeCall(streamKey, groupName, message.id)
-							} catch (responseError) {
-								console.error("🌊 Function: Error sending error response:", responseError)
+								// Try to parse default value based on type
+								switch (paramType) {
+									case "number":
+										value = Number(defaultValue)
+										break
+									case "boolean":
+										value = defaultValue.toLowerCase() === "true"
+										break
+									case "object":
+									case "array":
+										value = JSON.parse(defaultValue)
+										break
+									default:
+										value = defaultValue
+								}
+							} catch (error) {
+								value = defaultValue // Fall back to string if parsing fails
 							}
 						}
 					}
-				} catch (error) {
-					console.error("🌊 Function: Error reading from stream:", error)
-					// Wait a bit before retrying
-					await new Promise((resolve) => setTimeout(resolve, 1000))
+
+					locals[paramName] = value
 				}
-			}
 
-			console.log("🌊 Function: Consumer loop ended")
-		}
-
-		// Start the consumer loop
-		processStreamMessages().catch((error) => {
-			console.error("🌊 Function: Fatal error in stream consumer:", error)
-		})
-
-		console.log("🌊 Function: Function registered successfully, starting stream consumer")
-
-		// Return trigger response with cleanup
-		return {
-			closeFunction: async () => {
-				console.log("🌊 Function: Trigger closing, cleaning up")
-
-				// Stop the consumer loop
-				isActive = false
-
-				// Stop heartbeat
-				registry.stopHeartbeat(functionName, scope)
-
-				// Unregister function
-				await registry.unregisterFunction(functionName, scope)
-
-				// Clean up stream
-				await registry.cleanupStream(streamKey, groupName)
-			},
-			// Emit initial trigger data to activate the workflow
-			manualTriggerFunction: async () => {
-				const triggerData: INodeExecutionData = {
+				// Create the output item
+				let outputItem: INodeExecutionData = {
 					json: {
-						functionName,
-						registered: true,
-						scope,
-						timestamp: new Date().toISOString(),
+						...inputItem.json,
+						...locals,
 					},
+					index: 0,
+					binary: inputItem.binary,
 				}
-				this.emit([[triggerData]])
-			},
+
+				// Execute user code if enabled
+				if (enableCode && code.trim()) {
+					console.log("🌊 Function: Executing JavaScript code in in-memory mode")
+
+					try {
+						// Execute JavaScript code with parameters as global variables
+						const context = {
+							...locals,
+							item: outputItem.json,
+							console: {
+								log: (...args: any[]) => console.log("🌊 Function Code:", ...args),
+								error: (...args: any[]) => console.error("🌊 Function Code:", ...args),
+								warn: (...args: any[]) => console.warn("🌊 Function Code:", ...args),
+							},
+						}
+
+						// Execute JavaScript code directly (n8n already provides sandboxing)
+						const wrappedCode = `
+							(function() {
+								// Set up context variables
+								${Object.keys(context)
+									.map((key) => `var ${key} = arguments[0]["${key}"];`)
+									.join("\n\t\t\t\t\t\t\t")}
+								
+								// Execute user code
+								${code}
+							})
+						`
+
+						const result = eval(wrappedCode)(context)
+
+						console.log("🌊 Function: Code execution result =", result)
+
+						// If code returns a value, merge it with locals
+						if (result !== undefined) {
+							if (typeof result === "object" && result !== null) {
+								// Merge locals (parameters) first, then returned object (returned object wins conflicts)
+								outputItem.json = {
+									...outputItem.json,
+									...result,
+								}
+							} else {
+								// For non-object returns, include the result
+								outputItem.json = {
+									...outputItem.json,
+									result,
+								}
+							}
+						}
+					} catch (error) {
+						console.error("🌊 Function: Code execution error:", error)
+						outputItem.json = {
+							...outputItem.json,
+							_codeError: error.message,
+						}
+					}
+				}
+
+				return [outputItem]
+			})
+
+			console.log("🌊 Function: Function registered successfully in in-memory mode")
+
+			// Return trigger response with cleanup for in-memory mode
+			return {
+				closeFunction: async () => {
+					console.log("🌊 Function: Trigger closing, cleaning up in-memory function")
+					await registry.unregisterFunction(functionName, scope)
+				},
+				// Emit initial trigger data to activate the workflow
+				manualTriggerFunction: async () => {
+					const triggerData: INodeExecutionData = {
+						json: {
+							functionName,
+							registered: true,
+							scope,
+							timestamp: new Date().toISOString(),
+						},
+					}
+					this.emit([[triggerData]])
+				},
+			}
 		}
 	}
 }

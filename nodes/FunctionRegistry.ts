@@ -530,7 +530,12 @@ class FunctionRegistry {
 			callback,
 		})
 
-		// Store metadata in Redis for cross-process access
+		// Store metadata in Redis for cross-process access (only in queue mode)
+		if (!isQueueModeEnabled()) {
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis metadata storage`)
+			return
+		}
+
 		try {
 			await this.ensureRedisConnection()
 			if (!this.client) throw new Error("Redis client not available")
@@ -582,7 +587,12 @@ class FunctionRegistry {
 		// Remove from memory
 		this.listeners.delete(key)
 
-		// Remove from Redis
+		// Remove from Redis (only in queue mode)
+		if (!isQueueModeEnabled()) {
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis metadata cleanup`)
+			return
+		}
+
 		try {
 			await this.ensureRedisConnection()
 			if (!this.client) throw new Error("Redis client not available")
@@ -638,7 +648,12 @@ class FunctionRegistry {
 			}
 		}
 
-		// Try cross-worker call via Redis
+		// Try cross-worker call via Redis (only in queue mode)
+		if (!isQueueModeEnabled()) {
+			console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Function not found locally and queue mode disabled`)
+			return { result: null, actualExecutionId: callId }
+		}
+
 		console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Function not found locally, trying Redis pub/sub`)
 
 		try {
@@ -733,44 +748,46 @@ class FunctionRegistry {
 			functionNames.add(listener.functionName)
 		}
 
-		// Get functions from Redis (other processes)
-		try {
-			await this.ensureRedisConnection()
-			if (this.client) {
-				const functionKeys = await this.client.keys("function:meta:*")
-				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found ${functionKeys.length} function metadata keys`)
+		// Get functions from Redis (other processes) - only in queue mode
+		if (isQueueModeEnabled()) {
+			try {
+				await this.ensureRedisConnection()
+				if (this.client) {
+					const functionKeys = await this.client.keys("function:meta:*")
+					console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found ${functionKeys.length} function metadata keys`)
 
-				for (const key of functionKeys) {
-					if (key.startsWith("function:meta:")) {
-						// Extract function name from metadata key: function:meta:workerId:functionName
-						const parts = key.split(":")
-						if (parts.length >= 4) {
-							const functionName = parts.slice(3).join(":")
+					for (const key of functionKeys) {
+						if (key.startsWith("function:meta:")) {
+							// Extract function name from metadata key: function:meta:workerId:functionName
+							const parts = key.split(":")
+							if (parts.length >= 4) {
+								const functionName = parts.slice(3).join(":")
 
-							// If scope is specified, check if this function belongs to that scope
-							if (scope) {
-								// Get the metadata to check the execution ID (scope)
-								try {
-									const metadata = await this.client.hGetAll(key)
-									console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Checking function ${functionName}, metadata executionId: ${metadata.executionId}, looking for scope: ${scope}`)
-									if (metadata && metadata.executionId === scope) {
-										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Function ${functionName} matches scope ${scope}`)
-										functionNames.add(functionName)
-									} else {
-										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Function ${functionName} does not match scope ${scope}`)
+								// If scope is specified, check if this function belongs to that scope
+								if (scope) {
+									// Get the metadata to check the execution ID (scope)
+									try {
+										const metadata = await this.client.hGetAll(key)
+										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Checking function ${functionName}, metadata executionId: ${metadata.executionId}, looking for scope: ${scope}`)
+										if (metadata && metadata.executionId === scope) {
+											console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Function ${functionName} matches scope ${scope}`)
+											functionNames.add(functionName)
+										} else {
+											console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Function ${functionName} does not match scope ${scope}`)
+										}
+									} catch (metaError) {
+										console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error reading metadata for ${key}:`, metaError)
 									}
-								} catch (metaError) {
-									console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error reading metadata for ${key}:`, metaError)
+								} else {
+									functionNames.add(functionName)
 								}
-							} else {
-								functionNames.add(functionName)
 							}
 						}
 					}
 				}
+			} catch (error) {
+				console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting functions from Redis:`, error)
 			}
-		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting functions from Redis:`, error)
 		}
 
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found functions for scope '${scope || "all"}':`, Array.from(functionNames))
@@ -783,25 +800,27 @@ class FunctionRegistry {
 	async getFunctionParameters(functionName: string, executionId?: string): Promise<ParameterDefinition[]> {
 		// Try local first
 		for (const listener of this.listeners.values()) {
-			if (listener.functionName === functionName) {
+			if (listener.functionName === functionName && (!executionId || listener.executionId === executionId)) {
 				return listener.parameters
 			}
 		}
 
-		// Try Redis
-		try {
-			await this.ensureRedisConnection()
-			if (this.client) {
-				const metadataKeys = await this.client.keys(`function:meta:*:${functionName}`)
-				if (metadataKeys.length > 0) {
-					const metadataHash = await this.client.hGetAll(metadataKeys[0])
-					if (metadataHash && metadataHash.parameters) {
-						return JSON.parse(metadataHash.parameters)
+		// Try Redis (only in queue mode)
+		if (isQueueModeEnabled()) {
+			try {
+				await this.ensureRedisConnection()
+				if (this.client) {
+					const metadataKeys = await this.client.keys(`function:meta:*:${functionName}`)
+					if (metadataKeys.length > 0) {
+						const metadataHash = await this.client.hGetAll(metadataKeys[0])
+						if (metadataHash && metadataHash.parameters) {
+							return JSON.parse(metadataHash.parameters)
+						}
 					}
 				}
+			} catch (error) {
+				console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting function parameters from Redis:`, error)
 			}
-		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting function parameters from Redis:`, error)
 		}
 
 		return []
@@ -810,6 +829,11 @@ class FunctionRegistry {
 	// Return value methods (keeping existing implementation)
 	async setFunctionReturnValue(executionId: string, returnValue: any): Promise<void> {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ SETTING return value for execution: ${executionId}`)
+
+		if (!isQueueModeEnabled()) {
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis return value storage`)
+			return
+		}
 
 		try {
 			await this.ensureRedisConnection()
@@ -829,6 +853,11 @@ class FunctionRegistry {
 
 	async getFunctionReturnValue(executionId: string): Promise<any | null> {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 GETTING return value for execution: ${executionId}`)
+
+		if (!isQueueModeEnabled()) {
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, no return value available`)
+			return null
+		}
 
 		try {
 			await this.ensureRedisConnection()
@@ -852,6 +881,11 @@ class FunctionRegistry {
 
 	async clearFunctionReturnValue(executionId: string): Promise<void> {
 		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ CLEARING return value for execution: ${executionId}`)
+
+		if (!isQueueModeEnabled()) {
+			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis return value cleanup`)
+			return
+		}
 
 		try {
 			await this.ensureRedisConnection()
@@ -911,7 +945,12 @@ class FunctionRegistry {
 			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Promise created, storing resolve/reject handlers`)
 			this.returnPromises.set(executionId, { resolve, reject })
 
-			// Also set up Redis subscription for cross-process return values
+			// Also set up Redis subscription for cross-process return values (only in queue mode)
+			if (!isQueueModeEnabled()) {
+				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis subscription setup`)
+				return
+			}
+
 			try {
 				await this.ensureRedisConnection()
 				if (this.client) {
