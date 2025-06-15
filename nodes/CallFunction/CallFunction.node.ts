@@ -501,18 +501,7 @@ export class CallFunction implements INodeType {
 
 				// In queue mode, also check if we have Redis configuration
 				const registry = await getFunctionRegistry()
-				let useRedisStreams = queueModeStatus
-
-				// If queue mode flag is false but we have Redis config, try to use Redis anyway
-				if (!useRedisStreams) {
-					try {
-						await registry.testRedisConnection()
-						useRedisStreams = true
-						logger.log("🔍 CallFunction: Queue mode flag is false but Redis is available, using Redis streams")
-					} catch (error) {
-						logger.debug("🔍 CallFunction: Redis not available, using in-memory mode:", error.message)
-					}
-				}
+				const useRedisStreams = queueModeStatus
 
 				if (useRedisStreams) {
 					logger.log("🌊 CallFunction: Using Redis streams for function call")

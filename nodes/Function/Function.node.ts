@@ -180,18 +180,7 @@ export class Function implements INodeType {
 		}))
 
 		// Check if queue mode is enabled for Redis operations
-		let useRedisStreams = isQueueModeEnabled()
-
-		// If queue mode flag is false but we have Redis config, try to use Redis anyway
-		if (!useRedisStreams) {
-			try {
-				await registry.testRedisConnection()
-				useRedisStreams = true
-				logger.info("🔍 Function: Queue mode flag is false but Redis is available, using Redis streams")
-			} catch (error) {
-				logger.debug("🔍 Function: Redis not available, using in-memory mode:", error.message)
-			}
-		}
+		const useRedisStreams = isQueueModeEnabled()
 
 		if (useRedisStreams) {
 			logger.debug("Queue mode enabled, setting up Redis streams")

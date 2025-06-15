@@ -71,6 +71,10 @@ class FunctionRegistry {
 	 * Test Redis connection (public method for ConfigureFunctions node)
 	 */
 	async testRedisConnection(): Promise<void> {
+		// If queue mode is disabled, throw error immediately
+		if (!isQueueModeEnabled()) {
+			throw new Error("Queue mode is disabled")
+		}
 		await this.ensureRedisConnection()
 	}
 
