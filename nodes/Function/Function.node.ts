@@ -580,31 +580,12 @@ export class Function implements INodeType {
 				const returnPromise = registry.createReturnPromise(callId)
 				logger.log("🌊 Function: Return promise created")
 
-				// Wait briefly to detect if this is a void function
-				logger.log("🌊 Function: Checking if this is a void function...")
-				const voidDetectionTimeout = 50 // 50ms to detect void functions
+				// Wait for return value from ReturnFromFunction node
 				let returnValue = null
 
 				try {
-					// Race between the return promise and a timeout for void function detection
-					returnValue = await Promise.race([
-						returnPromise,
-						new Promise<null>((resolve) => {
-							setTimeout(() => {
-								logger.log("🌊 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
-								logger.log("🌊 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
-								resolve(null)
-							}, voidDetectionTimeout)
-						}),
-					])
-
-					// If we got null from the timeout, this is a void function
-					if (returnValue === null) {
-						logger.log("🌊 Function: 🟡 Completing immediately for void function")
-						registry.cleanupReturnPromise(callId)
-					} else {
-						logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
-					}
+					returnValue = await returnPromise
+					logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
 				} catch (error) {
 					logger.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
 					registry.cleanupReturnPromise(callId)
