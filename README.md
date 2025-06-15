@@ -1,6 +1,14 @@
 > Updating the README ... check back soon ...
 
-# 🧠 n8n-nodes-function
+# 🧠 n8n-nodes-function <!-- omit from toc -->
+
+- [📦 Features](#-features)
+- [ℹ️ Notes](#ℹ️-notes)
+- [🛠️ Installation](#️-installation)
+- [🔎 Similarities to n8n's `Execute Workflow`](#-similarities-to-n8ns-execute-workflow)
+  - [⚡ `Function` trigger (_similar to `When Executed by Another Workflow`_)](#-function-trigger-similar-to-when-executed-by-another-workflow)
+  - [➡️ `Call Function` (_similar to `Execute Workflow`_)](#️-call-function-similar-to-execute-workflow)
+- [🎓 Getting Started](#-getting-started)
 
 Blueprint-style function system for [n8n](https://n8n.io), inspired by Unreal Engine 5.
 
@@ -37,7 +45,7 @@ Define reusable logic blocks with `Function`, call them with `Call Function`, an
 
 <img src="screenshots/install-node.png" alt="Install n8n-nodes-function" width="350" />
 
-## Similarities to n8n's `Execute Workflow`
+## 🔎 Similarities to n8n's `Execute Workflow`
 
 Functions are a way of organizing reusable logic in `n8n`, similar to the `Execute Workflow` node.
 
@@ -62,3 +70,8 @@ It's just a different level of abstraction and a different way of organizing log
 ### ➡️ `Call Function` (_similar to `Execute Workflow`_)
 
 <img src="screenshots/call-function-like-execute-workflow.png" alt="Call Function is like Execute Workflow" width="600" />
+
+## 🎓 Getting Started
+
+...
+similar to `Execute Workflow`
