@@ -7,7 +7,7 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { getFunctionRegistry, enableRedisMode, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { type ParameterDefinition } from "../FunctionRegistry"
 import { functionNodeLogger as logger } from "../Logger"
 
@@ -261,20 +261,6 @@ export class Function implements INodeType {
 
 								logger.log("🌊 Function: Call ID:", callId)
 								logger.log("🌊 Function: Parameters:", params)
-
-								// Check for Redis host metadata and reconfigure if needed
-								if (inputItem.json && inputItem.json._function_call_metadata && inputItem.json._function_call_metadata.redis_host) {
-									const metadataRedisHost = inputItem.json._function_call_metadata.redis_host
-									const currentRedisHost = getRedisHost()
-
-									if (metadataRedisHost !== currentRedisHost) {
-										logger.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
-										enableRedisMode(metadataRedisHost)
-									}
-
-									// Clean up the metadata so it doesn't pollute downstream nodes
-									delete inputItem.json._function_call_metadata
-								}
 
 								// Note: We'll embed the call context in the output item instead of static data
 								// since static data doesn't transfer between workers in queue mode
