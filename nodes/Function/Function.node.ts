@@ -130,7 +130,7 @@ export class Function implements INodeType {
 					rows: 15,
 				},
 				default:
-					"// Parameters are available as global variables\n// Example: if you have a 'name' parameter, use it directly\n// console.log('Hello', name);\n\n// Process your parameters, call APIs, do calculations, etc.\n// const result = someCalculation(param1, param2);\n// console.log('Processed:', result);\n\n// Optionally return an object to add fields to the flowing item:\n// return { calculatedValue: result, timestamp: Date.now() };\n\n// To return from the function, use a 'Return from Function' node",
+					"// Parameters are available as global variables\n// Example: if you have a 'name' parameter, use it directly\n// logger.log('Hello', name);\n\n// Process your parameters, call APIs, do calculations, etc.\n// const result = someCalculation(param1, param2);\n// logger.log('Processed:', result);\n\n// Optionally return an object to add fields to the flowing item:\n// return { calculatedValue: result, timestamp: Date.now() };\n\n// To return from the function, use a 'Return from Function' node",
 				description:
 					"JavaScript code to execute within the function. Parameters are available as global variables. Returned objects add fields to the item flowing through the function.",
 				displayOptions: {
@@ -206,7 +206,7 @@ export class Function implements INodeType {
 							if (!isActive) break
 
 							try {
-								console.log("🌊 Function: Processing stream message:", message.id)
+								logger.log("🌊 Function: Processing stream message:", message.id)
 
 								// Parse message fields
 								const callId = message.message.callId
@@ -214,8 +214,8 @@ export class Function implements INodeType {
 								const inputItem = JSON.parse(message.message.inputItem)
 								const responseChannel = message.message.responseChannel
 
-								console.log("🌊 Function: Call ID:", callId)
-								console.log("🌊 Function: Parameters:", params)
+								logger.log("🌊 Function: Call ID:", callId)
+								logger.log("🌊 Function: Parameters:", params)
 
 								// Check for Redis host metadata and reconfigure if needed
 								if (inputItem.json && inputItem.json._function_call_metadata && inputItem.json._function_call_metadata.redis_host) {
@@ -223,7 +223,7 @@ export class Function implements INodeType {
 									const currentRedisHost = getRedisHost()
 
 									if (metadataRedisHost !== currentRedisHost) {
-										console.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
+										logger.log("🌊 Function: Reconfiguring Redis host from metadata:", metadataRedisHost)
 										enableRedisMode(metadataRedisHost)
 									}
 
@@ -244,7 +244,7 @@ export class Function implements INodeType {
 									const defaultValue = param.defaultValue
 
 									let value = params[paramName]
-									console.log("🌊 Function: Processing parameter", paramName, "=", value)
+									logger.log("🌊 Function: Processing parameter", paramName, "=", value)
 
 									// Handle required parameters
 									if (required && (value === undefined || value === null)) {
@@ -279,7 +279,7 @@ export class Function implements INodeType {
 									locals[paramName] = value
 								}
 
-								console.log("🌊 Function: Final locals =", locals)
+								logger.log("🌊 Function: Final locals =", locals)
 
 								// Create the output item
 								let outputItem: INodeExecutionData = {
@@ -303,7 +303,7 @@ export class Function implements INodeType {
 
 								// Execute user code if enabled
 								if (enableCode && code.trim()) {
-									console.log("🌊 Function: Executing JavaScript code")
+									logger.log("🌊 Function: Executing JavaScript code")
 
 									try {
 										// Execute JavaScript code with parameters as global variables
@@ -311,9 +311,9 @@ export class Function implements INodeType {
 											...locals,
 											item: outputItem.json,
 											console: {
-												log: (...args: any[]) => console.log("🌊 Function Code:", ...args),
-												error: (...args: any[]) => console.error("🌊 Function Code:", ...args),
-												warn: (...args: any[]) => console.warn("🌊 Function Code:", ...args),
+												log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
+												error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
+												warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
 											},
 										}
 
@@ -332,7 +332,7 @@ export class Function implements INodeType {
 
 										const result = eval(wrappedCode)(context)
 
-										console.log("🌊 Function: Code execution result =", result)
+										logger.log("🌊 Function: Code execution result =", result)
 
 										// If code returns a value, merge it with locals
 										if (result !== undefined) {
@@ -351,7 +351,7 @@ export class Function implements INodeType {
 											}
 										}
 									} catch (error) {
-										console.error("🌊 Function: Code execution error:", error)
+										logger.error("🌊 Function: Code execution error:", error)
 										outputItem.json = {
 											...outputItem.json,
 											_codeError: error.message,
@@ -359,12 +359,12 @@ export class Function implements INodeType {
 									}
 								}
 
-								console.log("🌊 Function: Emitting output item:", outputItem)
+								logger.log("🌊 Function: Emitting output item:", outputItem)
 
 								// Emit the item to continue the workflow
 								this.emit([[outputItem]])
 							} catch (error) {
-								console.error("🌊 Function: Error processing message:", error)
+								logger.error("🌊 Function: Error processing message:", error)
 
 								// Send error response
 								try {
@@ -381,23 +381,23 @@ export class Function implements INodeType {
 									// Acknowledge the message even on error to prevent reprocessing
 									await registry.acknowledgeCall(streamKey, groupName, message.id)
 								} catch (responseError) {
-									console.error("🌊 Function: Error sending error response:", responseError)
+									logger.error("🌊 Function: Error sending error response:", responseError)
 								}
 							}
 						}
 					} catch (error) {
-						console.error("🌊 Function: Error reading from stream:", error)
+						logger.error("🌊 Function: Error reading from stream:", error)
 						// Wait a bit before retrying
 						await new Promise((resolve) => setTimeout(resolve, 1000))
 					}
 				}
 
-				console.log("🌊 Function: Consumer loop ended")
+				logger.log("🌊 Function: Consumer loop ended")
 			}
 
 			// Start the consumer loop
 			processStreamMessages().catch((error) => {
-				console.error("🌊 Function: Fatal error in stream consumer:", error)
+				logger.error("🌊 Function: Fatal error in stream consumer:", error)
 			})
 
 			logger.info("Function registered successfully, starting stream consumer")
@@ -405,7 +405,7 @@ export class Function implements INodeType {
 			// Return trigger response with cleanup for queue mode
 			return {
 				closeFunction: async () => {
-					console.log("🌊 Function: Trigger closing, cleaning up")
+					logger.log("🌊 Function: Trigger closing, cleaning up")
 
 					// Stop the consumer loop
 					isActive = false
@@ -437,7 +437,7 @@ export class Function implements INodeType {
 
 			// Register function in memory only
 			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
-				console.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
+				logger.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
 
 				// Process parameters according to function definition
 				const locals: Record<string, any> = {}
@@ -514,7 +514,7 @@ export class Function implements INodeType {
 
 				// Execute user code if enabled
 				if (enableCode && code.trim()) {
-					console.log("🌊 Function: Executing JavaScript code in in-memory mode")
+					logger.log("🌊 Function: Executing JavaScript code in in-memory mode")
 
 					try {
 						// Execute JavaScript code with parameters as global variables
@@ -522,9 +522,9 @@ export class Function implements INodeType {
 							...locals,
 							item: outputItem.json,
 							console: {
-								log: (...args: any[]) => console.log("🌊 Function Code:", ...args),
-								error: (...args: any[]) => console.error("🌊 Function Code:", ...args),
-								warn: (...args: any[]) => console.warn("🌊 Function Code:", ...args),
+								log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
+								error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
+								warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
 							},
 						}
 
@@ -543,7 +543,7 @@ export class Function implements INodeType {
 
 						const result = eval(wrappedCode)(context)
 
-						console.log("🌊 Function: Code execution result =", result)
+						logger.log("🌊 Function: Code execution result =", result)
 
 						// If code returns a value, merge it with locals
 						if (result !== undefined) {
@@ -562,7 +562,7 @@ export class Function implements INodeType {
 							}
 						}
 					} catch (error) {
-						console.error("🌊 Function: Code execution error:", error)
+						logger.error("🌊 Function: Code execution error:", error)
 						outputItem.json = {
 							...outputItem.json,
 							_codeError: error.message,
@@ -570,18 +570,18 @@ export class Function implements INodeType {
 					}
 				}
 
-				console.log("🌊 Function: Emitting output item to downstream nodes")
+				logger.log("🌊 Function: Emitting output item to downstream nodes")
 				this.emit([[outputItem]])
 
 				// Use promise-based return handling like the reference implementation
-				console.log("🌊 Function: Setting up promise-based return handling...")
+				logger.log("🌊 Function: Setting up promise-based return handling...")
 
 				// Create a return promise for this execution
 				const returnPromise = registry.createReturnPromise(callId)
-				console.log("🌊 Function: Return promise created")
+				logger.log("🌊 Function: Return promise created")
 
 				// Wait briefly to detect if this is a void function
-				console.log("🌊 Function: Checking if this is a void function...")
+				logger.log("🌊 Function: Checking if this is a void function...")
 				const voidDetectionTimeout = 50 // 50ms to detect void functions
 				let returnValue = null
 
@@ -591,8 +591,8 @@ export class Function implements INodeType {
 						returnPromise,
 						new Promise<null>((resolve) => {
 							setTimeout(() => {
-								console.log("🌊 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
-								console.log("🌊 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
+								logger.log("🌊 Function: 🟡 No return detected in", voidDetectionTimeout, "ms")
+								logger.log("🌊 Function: 🟡 This appears to be a VOID FUNCTION (no ReturnFromFunction node)")
 								resolve(null)
 							}, voidDetectionTimeout)
 						}),
@@ -600,19 +600,19 @@ export class Function implements INodeType {
 
 					// If we got null from the timeout, this is a void function
 					if (returnValue === null) {
-						console.log("🌊 Function: 🟡 Completing immediately for void function")
+						logger.log("🌊 Function: 🟡 Completing immediately for void function")
 						registry.cleanupReturnPromise(callId)
 					} else {
-						console.log("🌊 Function: ✅ Return value received via promise:", returnValue)
+						logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
 					}
 				} catch (error) {
-					console.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
+					logger.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
 					registry.cleanupReturnPromise(callId)
 					// For errors, we'll still complete the function
 					returnValue = null
 				}
 
-				console.log("🌊 Function: Function execution completed, final return value:", returnValue)
+				logger.log("🌊 Function: Function execution completed, final return value:", returnValue)
 
 				return [outputItem]
 			})
@@ -622,7 +622,7 @@ export class Function implements INodeType {
 			// Return trigger response with cleanup for in-memory mode
 			return {
 				closeFunction: async () => {
-					console.log("🌊 Function: Trigger closing, cleaning up in-memory function")
+					logger.log("🌊 Function: Trigger closing, cleaning up in-memory function")
 					await registry.unregisterFunction(functionName, scope)
 				},
 				// Emit initial trigger data to activate the workflow

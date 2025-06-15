@@ -1,5 +1,6 @@
 import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
 import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { functionRegistryLogger as logger } from "../Logger"
 
 export class ReturnFromFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -32,24 +33,24 @@ export class ReturnFromFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🌊 ReturnFromFunction: ===== STARTING EXECUTION =====")
-		console.log("🌊 ReturnFromFunction: Node execution started at:", new Date().toISOString())
+		logger.log("🌊 ReturnFromFunction: ===== STARTING EXECUTION =====")
+		logger.log("🌊 ReturnFromFunction: Node execution started at:", new Date().toISOString())
 
 		const items = this.getInputData()
-		console.log("🌊 ReturnFromFunction: Input items count:", items.length)
-		console.log("🌊 ReturnFromFunction: Input items:", items)
+		logger.log("🌊 ReturnFromFunction: Input items count:", items.length)
+		logger.log("🌊 ReturnFromFunction: Input items:", items)
 
 		const returnData: INodeExecutionData[] = []
 		const registry = await getFunctionRegistry()
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			console.log(`🌊 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)
+			logger.log(`🌊 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)
 
 			const returnCode = this.getNodeParameter("returnCode", itemIndex) as string
 			const item = items[itemIndex]
 
-			console.log("🌊 ReturnFromFunction: Return code =", returnCode)
-			console.log("🌊 ReturnFromFunction: Processing item =", item)
+			logger.log("🌊 ReturnFromFunction: Return code =", returnCode)
+			logger.log("🌊 ReturnFromFunction: Processing item =", item)
 
 			// Get call context from the item's _functionCall field
 			const functionCallData = item.json._functionCall as
@@ -68,7 +69,7 @@ export class ReturnFromFunction implements INodeType {
 				throw new NodeOperationError(this.getNode(), "ReturnFromFunction must be used within a Function that was called via CallFunction")
 			}
 
-			console.log("🌊 ReturnFromFunction: Function call data:", functionCallData)
+			logger.log("🌊 ReturnFromFunction: Function call data:", functionCallData)
 
 			// Extract call context
 			const callContext = {
@@ -90,9 +91,9 @@ export class ReturnFromFunction implements INodeType {
 					$index: itemIndex,
 					$item: item,
 					console: {
-						log: (...args: any[]) => console.log("🌊 ReturnFromFunction Code:", ...args),
-						error: (...args: any[]) => console.error("🌊 ReturnFromFunction Code:", ...args),
-						warn: (...args: any[]) => console.warn("🌊 ReturnFromFunction Code:", ...args),
+						log: (...args: any[]) => logger.log("🌊 ReturnFromFunction Code:", ...args),
+						error: (...args: any[]) => logger.error("🌊 ReturnFromFunction Code:", ...args),
+						warn: (...args: any[]) => logger.warn("🌊 ReturnFromFunction Code:", ...args),
 					},
 					Date,
 					Math,
@@ -113,9 +114,9 @@ export class ReturnFromFunction implements INodeType {
 				`
 
 				parsedReturnValue = eval(wrappedCode)(context)
-				console.log("🌊 ReturnFromFunction: Code execution result =", parsedReturnValue)
+				logger.log("🌊 ReturnFromFunction: Code execution result =", parsedReturnValue)
 			} catch (error) {
-				console.error("🌊 ReturnFromFunction: Code execution error:", error)
+				logger.error("🌊 ReturnFromFunction: Code execution error:", error)
 
 				// Send error response
 				await registry.publishResponse(callContext.responseChannel, {
@@ -140,11 +141,11 @@ export class ReturnFromFunction implements INodeType {
 				parsedReturnValue = cleanedReturnValue
 			}
 
-			console.log("🌊 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
+			logger.log("🌊 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
 
 			// Check if queue mode is enabled to determine how to return the value
 			if (isQueueModeEnabled()) {
-				console.log("🌊 ReturnFromFunction: Queue mode enabled, using Redis streams")
+				logger.log("🌊 ReturnFromFunction: Queue mode enabled, using Redis streams")
 				try {
 					// Publish successful response
 					await registry.publishResponse(callContext.responseChannel, {
@@ -154,35 +155,35 @@ export class ReturnFromFunction implements INodeType {
 						timestamp: Date.now(),
 					})
 
-					console.log("🌊 ReturnFromFunction: ✅ Response published successfully!")
+					logger.log("🌊 ReturnFromFunction: ✅ Response published successfully!")
 
 					// Acknowledge the stream message
 					await registry.acknowledgeCall(callContext.streamKey, callContext.groupName, callContext.messageId)
 
-					console.log("🌊 ReturnFromFunction: ✅ Stream message acknowledged!")
+					logger.log("🌊 ReturnFromFunction: ✅ Stream message acknowledged!")
 
 					// Pop the current function execution from the stack
 					registry.popCurrentFunctionExecution()
 				} catch (error) {
-					console.error("🌊 ReturnFromFunction: ❌ Error publishing response:", error)
+					logger.error("🌊 ReturnFromFunction: ❌ Error publishing response:", error)
 					throw new NodeOperationError(this.getNode(), `Failed to publish response: ${error.message}`)
 				}
 			} else {
-				console.log("🌊 ReturnFromFunction: Queue mode disabled, using direct return value resolution")
+				logger.log("🌊 ReturnFromFunction: Queue mode disabled, using direct return value resolution")
 				try {
 					// Resolve the return value directly for in-memory mode
 					await registry.resolveReturn(callContext.callId, parsedReturnValue)
-					console.log("🌊 ReturnFromFunction: ✅ Return value resolved directly!")
+					logger.log("🌊 ReturnFromFunction: ✅ Return value resolved directly!")
 
 					// Pop the current function execution from the stack
 					registry.popCurrentFunctionExecution()
 				} catch (error) {
-					console.error("🌊 ReturnFromFunction: ❌ Error resolving return value:", error)
+					logger.error("🌊 ReturnFromFunction: ❌ Error resolving return value:", error)
 					throw new NodeOperationError(this.getNode(), `Failed to resolve return value: ${error.message}`)
 				}
 			}
 
-			console.log("🌊 ReturnFromFunction: ✅ Return value handled successfully")
+			logger.log("🌊 ReturnFromFunction: ✅ Return value handled successfully")
 
 			// Clean up the result item by removing internal fields
 			const cleanedJson = { ...item.json }
@@ -197,9 +198,9 @@ export class ReturnFromFunction implements INodeType {
 			returnData.push(resultItem)
 		}
 
-		console.log("🌊 ReturnFromFunction: ===== EXECUTION COMPLETE =====")
-		console.log("🌊 ReturnFromFunction: Final return data:", returnData)
-		console.log("🌊 ReturnFromFunction: Node execution completed at:", new Date().toISOString())
+		logger.log("🌊 ReturnFromFunction: ===== EXECUTION COMPLETE =====")
+		logger.log("🌊 ReturnFromFunction: Final return data:", returnData)
+		logger.log("🌊 ReturnFromFunction: Node execution completed at:", new Date().toISOString())
 		return [returnData]
 	}
 }

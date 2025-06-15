@@ -8,6 +8,7 @@ import {
 	NodeOperationError,
 } from "n8n-workflow"
 import { getFunctionRegistry, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { functionRegistryLogger as logger } from "../Logger"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -168,9 +169,9 @@ export class CallFunction implements INodeType {
 	methods = {
 		loadOptions: {
 			async getAvailableFunctions(this: ILoadOptionsFunctions) {
-				console.log("🔧 CallFunction: Loading available functions for dropdown")
+				logger.log("🔧 CallFunction: Loading available functions for dropdown")
 				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
-				console.log("🔧 CallFunction: Global function mode:", globalFunction)
+				logger.log("🔧 CallFunction: Global function mode:", globalFunction)
 
 				const registry = await getFunctionRegistry()
 				let availableFunctions
@@ -191,7 +192,7 @@ export class CallFunction implements INodeType {
 					}
 				} else {
 					// Show local functions - get all functions and filter out globals
-					console.log("🔧 CallFunction: Getting all functions and filtering out global ones")
+					logger.log("🔧 CallFunction: Getting all functions and filtering out global ones")
 					const allFunctions = await registry.getAvailableFunctions() // Get all functions without scope filter
 
 					// Filter to only show non-global functions
@@ -210,7 +211,7 @@ export class CallFunction implements INodeType {
 						}
 					}
 
-					console.log("🔧 CallFunction: Found local functions:", localFunctions)
+					logger.log("🔧 CallFunction: Found local functions:", localFunctions)
 					availableFunctions = localFunctions
 
 					// If no local functions found, add a helpful message
@@ -230,7 +231,7 @@ export class CallFunction implements INodeType {
 					}
 				}
 
-				console.log("🔧 CallFunction: Available functions:", availableFunctions)
+				logger.log("🔧 CallFunction: Available functions:", availableFunctions)
 				return availableFunctions
 			},
 			async getFunctionParameters(this: ILoadOptionsFunctions) {
@@ -238,9 +239,9 @@ export class CallFunction implements INodeType {
 				const lastConfiguredFunction = this.getCurrentNodeParameter("lastConfiguredFunction") as string
 				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
 
-				console.log("🔧 CallFunction: Loading parameters for function:", functionName)
-				console.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
-				console.log("🔧 CallFunction: Global function mode:", globalFunction)
+				logger.log("🔧 CallFunction: Loading parameters for function:", functionName)
+				logger.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
+				logger.log("🔧 CallFunction: Global function mode:", globalFunction)
 
 				if (!functionName || functionName === "__no_local_functions__" || functionName === "__no_global_functions__" || functionName === "__activate_workflow__") {
 					return []
@@ -257,7 +258,7 @@ export class CallFunction implements INodeType {
 					try {
 						workflowId = this.getWorkflow().id || "unknown"
 					} catch (error) {
-						console.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
+						logger.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
 					}
 
 					// If still unknown, try to get from static data
@@ -268,22 +269,22 @@ export class CallFunction implements INodeType {
 								workflowId = String(staticData.workflowId)
 							}
 						} catch (error) {
-							console.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
+							logger.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
 						}
 					}
 
-					console.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
+					logger.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
 					parameters = await registry.getFunctionParameters(functionName, workflowId)
 
 					// Fallback: if no parameters found with specific scope (e.g., workflowId is "unknown" during design-time)
 					// try to get parameters without scope filtering
 					if (parameters.length === 0 && (workflowId === "unknown" || workflowId === "")) {
-						console.log("🔧 CallFunction: No parameters found with scope, trying fallback without scope")
+						logger.log("🔧 CallFunction: No parameters found with scope, trying fallback without scope")
 						parameters = await registry.getFunctionParameters(functionName)
 					}
 				}
 
-				console.log("🔧 CallFunction: Found parameters:", parameters)
+				logger.log("🔧 CallFunction: Found parameters:", parameters)
 
 				// Get currently selected parameters
 				const currentParameters = this.getCurrentNodeParameter("parameters") as any
@@ -297,7 +298,7 @@ export class CallFunction implements INodeType {
 					}
 				}
 
-				console.log("🔧 CallFunction: Already selected parameters:", Array.from(selectedParameterNames))
+				logger.log("🔧 CallFunction: Already selected parameters:", Array.from(selectedParameterNames))
 
 				// Check if the function has changed from what was last configured
 				const functionChanged = lastConfiguredFunction && lastConfiguredFunction !== functionName
@@ -307,7 +308,7 @@ export class CallFunction implements INodeType {
 				const hasInvalidParameters = Array.from(selectedParameterNames).some((name) => !validParameterNames.has(name))
 
 				if (functionChanged || hasInvalidParameters) {
-					console.log("🔧 CallFunction: Detected function change - showing reset warning")
+					logger.log("🔧 CallFunction: Detected function change - showing reset warning")
 
 					// If there are existing parameters that need to be cleared
 					if (selectedParameterNames.size > 0) {
@@ -335,7 +336,7 @@ export class CallFunction implements INodeType {
 
 				// Filter out already-selected parameters (normal case)
 				const availableParameters = parameters.filter((param) => !selectedParameterNames.has(param.name))
-				console.log("🔧 CallFunction: Available parameters after filtering:", availableParameters)
+				logger.log("🔧 CallFunction: Available parameters after filtering:", availableParameters)
 
 				// If no parameters are available, return a descriptive message
 				if (availableParameters.length === 0) {
@@ -360,16 +361,16 @@ export class CallFunction implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const nodeId = this.getNode().id
 		const nodeName = this.getNode().name
-		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Starting execution`)
+		logger.log(`Starting execution`)
 		const items = this.getInputData()
-		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Input items count =`, items.length)
+		logger.log(`Input items count =`, items.length)
 
 		// Debug: Log all node parameters
 		try {
 			const nodeParams = this.getNode().parameters
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Node parameters:`, JSON.stringify(nodeParams, null, 2))
+			logger.log(`Node parameters:`, JSON.stringify(nodeParams, null, 2))
 		} catch (error) {
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Could not get node parameters:`, error.message)
+			logger.log(`Could not get node parameters:`, error.message)
 		}
 
 		const returnData: INodeExecutionData[] = []
@@ -378,7 +379,7 @@ export class CallFunction implements INodeType {
 			// Debug: Log node information
 			const nodeId = this.getNode().id
 			const nodeName = this.getNode().name
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Processing item ${itemIndex + 1}/${items.length}`)
+			logger.log(`Processing item ${itemIndex + 1}/${items.length}`)
 
 			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
@@ -386,14 +387,14 @@ export class CallFunction implements INodeType {
 			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
 			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex, "") as string
 
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Global function =`, globalFunction)
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Function name =`, functionName)
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Parameter mode =`, parameterMode)
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Store response =`, storeResponse)
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Response variable name =`, responseVariableName)
+			logger.log(`Global function =`, globalFunction)
+			logger.log(`Function name =`, functionName)
+			logger.log(`Parameter mode =`, parameterMode)
+			logger.log(`Store response =`, storeResponse)
+			logger.log(`Response variable name =`, responseVariableName)
 
 			// Debug: Log the raw parameter value
-			console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Raw globalFunction parameter:`, typeof globalFunction, globalFunction)
+			logger.log(`Raw globalFunction parameter:`, typeof globalFunction, globalFunction)
 
 			if (!functionName || functionName === "__no_local_functions__" || functionName === "__activate_workflow__") {
 				throw new NodeOperationError(this.getNode(), "Please select a valid function. If no functions are available, activate the workflow first.")
@@ -417,7 +418,7 @@ export class CallFunction implements INodeType {
 
 			if (parameterMode === "json") {
 				const parametersJson = this.getNodeParameter("parametersJson", itemIndex) as string
-				console.log("🔧 CallFunction: Raw JSON parameters =", parametersJson)
+				logger.log("🔧 CallFunction: Raw JSON parameters =", parametersJson)
 				try {
 					functionParameters = JSON.parse(parametersJson)
 				} catch (error) {
@@ -427,7 +428,7 @@ export class CallFunction implements INodeType {
 				// Individual parameters mode
 				const parameters = this.getNodeParameter("parameters", itemIndex, {}) as any
 				const parameterList = parameters.parameter || []
-				console.log("🔧 CallFunction: Parameter list =", parameterList)
+				logger.log("🔧 CallFunction: Parameter list =", parameterList)
 
 				// Validate parameters and filter out invalid ones
 				const validParameters = []
@@ -462,14 +463,14 @@ export class CallFunction implements INodeType {
 
 				// Warn about invalid parameters
 				if (invalidParameters.length > 0) {
-					console.warn("🔧 CallFunction: Invalid parameters detected (function may have changed):", invalidParameters)
-					console.log("🔧 CallFunction: Valid parameters for function:", Array.from(validParameterNames))
+					logger.warn("🔧 CallFunction: Invalid parameters detected (function may have changed):", invalidParameters)
+					logger.log("🔧 CallFunction: Valid parameters for function:", Array.from(validParameterNames))
 				}
 
-				console.log("🔧 CallFunction: Valid parameters used:", validParameters)
+				logger.log("🔧 CallFunction: Valid parameters used:", validParameters)
 			}
 
-			console.log("🔧 CallFunction: Final parameters =", functionParameters)
+			logger.log("🔧 CallFunction: Final parameters =", functionParameters)
 
 			// Determine the scope to use based on global function setting
 			let targetScope: string
@@ -483,8 +484,8 @@ export class CallFunction implements INodeType {
 				targetScope = workflowId
 			}
 
-			console.log("🔧 CallFunction: Target scope =", targetScope)
-			console.log("🔧 CallFunction: Global function =", globalFunction)
+			logger.log("🔧 CallFunction: Target scope =", targetScope)
+			logger.log("🔧 CallFunction: Global function =", globalFunction)
 
 			// Use the registry instance to call the function
 			const item = items[itemIndex]
@@ -492,16 +493,16 @@ export class CallFunction implements INodeType {
 			try {
 				// Check if queue mode is enabled to determine call method
 				if (isQueueModeEnabled()) {
-					console.log("🌊 CallFunction: Queue mode enabled, using Redis streams")
+					logger.log("🌊 CallFunction: Queue mode enabled, using Redis streams")
 
 					// Generate unique call ID
 					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
 					const responseChannel = `function:response:${callId}`
 					const streamKey = `function:stream:${targetScope}:${functionName}`
 
-					console.log("🌊 CallFunction: Call ID:", callId)
-					console.log("🌊 CallFunction: Stream key:", streamKey)
-					console.log("🌊 CallFunction: Response channel:", responseChannel)
+					logger.log("🌊 CallFunction: Call ID:", callId)
+					logger.log("🌊 CallFunction: Stream key:", streamKey)
+					logger.log("🌊 CallFunction: Response channel:", responseChannel)
 
 					// Check if any workers are available for this function
 					const availableWorkers = await registry.getAvailableWorkers(functionName)
@@ -523,25 +524,25 @@ export class CallFunction implements INodeType {
 						throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available`)
 					}
 
-					console.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
+					logger.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
 
 					// Check if stream is ready before making the call
 					const groupName = `group:${functionName}`
-					console.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
+					logger.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
 
 					const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
 
 					if (!isReady) {
-						console.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
+						logger.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
 						// Don't throw error immediately, try the call - it might work if function is just starting
 					} else {
-						console.log("🌊 CallFunction: Stream is ready, proceeding with call")
+						logger.log("🌊 CallFunction: Stream is ready, proceeding with call")
 					}
 
 					// Add call to stream
 					await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
 
-					console.log("🌊 CallFunction: Call added to stream, waiting for response...")
+					logger.log("🌊 CallFunction: Call added to stream, waiting for response...")
 
 					// Wait for response with retry logic for the first call
 					let response
@@ -555,17 +556,17 @@ export class CallFunction implements INodeType {
 							break // Success, exit retry loop
 						} catch (error) {
 							retryCount++
-							console.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
+							logger.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
 
 							if (retryCount <= maxRetries) {
-								console.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
+								logger.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
 								await new Promise((resolve) => setTimeout(resolve, 2000))
 
 								// Generate new call ID for retry
 								const retryCallId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
 								const retryResponseChannel = `function:response:${retryCallId}`
 
-								console.log("🌊 CallFunction: Retry call ID:", retryCallId)
+								logger.log("🌊 CallFunction: Retry call ID:", retryCallId)
 
 								// Add retry call to stream
 								await registry.addCall(streamKey, retryCallId, functionName, functionParameters, item, retryResponseChannel, 30000)
@@ -578,7 +579,7 @@ export class CallFunction implements INodeType {
 						}
 					}
 
-					console.log("🌊 CallFunction: Received response:", response)
+					logger.log("🌊 CallFunction: Received response:", response)
 
 					if (!response.success) {
 						throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
@@ -619,10 +620,10 @@ export class CallFunction implements INodeType {
 						binary: item.binary,
 					}
 
-					console.log("🌊 CallFunction: Created result item =", resultItem)
+					logger.log("🌊 CallFunction: Created result item =", resultItem)
 					returnData.push(resultItem)
 				} else {
-					console.log("🔧 CallFunction: Queue mode disabled, using direct in-memory call")
+					logger.log("🔧 CallFunction: Queue mode disabled, using direct in-memory call")
 
 					// Call function directly via registry
 					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
@@ -631,12 +632,12 @@ export class CallFunction implements INodeType {
 						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
 					}
 
-					console.log("🔧 CallFunction: Direct call result:", callResult.result)
+					logger.log("🔧 CallFunction: Direct call result:", callResult.result)
 
 					// Process the result - callResult.result is an array of INodeExecutionData
 					for (const resultItem of callResult.result) {
 						// Check if function returned a value via ReturnFromFunction node
-						console.log("🔧 CallFunction: About to check for return value...")
+						logger.log("🔧 CallFunction: About to check for return value...")
 
 						// Extract the callId from the _functionCall metadata in the result
 						let returnValueKey = callResult.actualExecutionId
@@ -644,24 +645,24 @@ export class CallFunction implements INodeType {
 							const functionCallData = resultItem.json._functionCall as any
 							if (functionCallData.callId) {
 								returnValueKey = functionCallData.callId
-								console.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
+								logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
 							} else {
-								console.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
+								logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
 							}
 						} else {
-							console.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
+							logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
 						}
 
 						const returnValue = await registry.getFunctionReturnValue(returnValueKey)
-						console.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+						logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
 
 						let finalReturnValue = resultItem.json
 
 						// Clear the return value from registry after retrieving it
 						if (returnValue !== null) {
-							console.log("🔧 CallFunction: Clearing return value from registry...")
+							logger.log("🔧 CallFunction: Clearing return value from registry...")
 							await registry.clearFunctionReturnValue(returnValueKey)
-							console.log("🔧 CallFunction: Return value cleared")
+							logger.log("🔧 CallFunction: Return value cleared")
 							finalReturnValue = returnValue
 						} else {
 							// Clean up any _functionCall metadata from the result
@@ -694,12 +695,12 @@ export class CallFunction implements INodeType {
 							binary: resultItem.binary || item.binary,
 						}
 
-						console.log("🔧 CallFunction: Created result item =", finalResultItem)
+						logger.log("🔧 CallFunction: Created result item =", finalResultItem)
 						returnData.push(finalResultItem)
 					}
 				}
 			} catch (error) {
-				console.error("🔧 CallFunction: Error calling function:", error)
+				logger.error("🔧 CallFunction: Error calling function:", error)
 
 				// Create an error result item
 				const errorItem: INodeExecutionData = {
@@ -724,7 +725,7 @@ export class CallFunction implements INodeType {
 			}
 		}
 
-		console.log("🔧 CallFunction: Returning data =", returnData)
+		logger.log("🔧 CallFunction: Returning data =", returnData)
 		return [returnData]
 	}
 }

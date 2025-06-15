@@ -61,7 +61,7 @@ class FunctionRegistry {
 	 * Set Redis configuration (public method for ConfigureFunctions node)
 	 */
 	setRedisConfig(host: string, port: number = 6379): void {
-		console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Setting Redis config - host: ${host}, port: ${port}`)
+		logger.log(`Setting Redis config - host: ${host}, port: ${port}`)
 		this.redisHost = host
 		this.redisPort = port
 		// Reset connection state to force reconnection with new config
@@ -79,7 +79,7 @@ class FunctionRegistry {
 	private async ensureRedisConnection(): Promise<void> {
 		// Skip Redis connection entirely if queue mode is not enabled
 		if (!isQueueModeEnabled()) {
-			console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis connection`)
+			logger.log(`Queue mode disabled, skipping Redis connection`)
 			return
 		}
 
@@ -88,7 +88,7 @@ class FunctionRegistry {
 		}
 
 		try {
-			console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Connecting to Redis at redis://${this.redisHost}:${this.redisPort}`)
+			logger.log(`Connecting to Redis at redis://${this.redisHost}:${this.redisPort}`)
 
 			// Main client for metadata storage
 			this.client = createClient({
@@ -125,12 +125,12 @@ class FunctionRegistry {
 			await this.subscriber.connect()
 
 			this.isConnected = true
-			console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Successfully connected to Redis`)
+			logger.log(`Successfully connected to Redis`)
 
 			// Set up function call listener
 			await this.setupFunctionCallListener()
 		} catch (error) {
-			console.error(`🔴 FunctionRegistry[${WORKER_ID}]: Failed to connect to Redis:`, error)
+			logger.error(`Failed to connect to Redis:`, error)
 			this.isConnected = false
 			throw error
 		}
@@ -144,10 +144,10 @@ class FunctionRegistry {
 		try {
 			// Subscribe to function calls targeted at this worker
 			const callPattern = `function:call:${WORKER_ID}:*`
-			console.log(`🔔 FunctionRegistry[${WORKER_ID}]: Setting up listener for ${callPattern}`)
+			logger.log(`Setting up listener for ${callPattern}`)
 
 			await this.subscriber.pSubscribe(callPattern, async (message, channel) => {
-				console.log(`🔔 FunctionRegistry[${WORKER_ID}]: Received function call on ${channel}:`, message)
+				logger.log(`Received function call on ${channel}:`, message)
 
 				try {
 					const parsedMessage = JSON.parse(message)
@@ -157,12 +157,12 @@ class FunctionRegistry {
 					const functionKey = Object.keys(this.listeners).find((key) => this.listeners.get(key)?.functionName === functionName)
 
 					if (!functionKey) {
-						console.warn(`🔔 FunctionRegistry[${WORKER_ID}]: No local function found for ${functionName}`)
+						logger.warn(`No local function found for ${functionName}`)
 						return
 					}
 
 					const listener = this.listeners.get(functionKey)!
-					console.log(`🔔 FunctionRegistry[${WORKER_ID}]: Executing function ${functionName}`)
+					logger.log(`Executing function ${functionName}`)
 
 					// Execute the function
 					const result = await listener.callback(parameters, inputItem)
@@ -170,9 +170,9 @@ class FunctionRegistry {
 					// Send result back
 					const response = { callId, result, success: true }
 					await this.publisher!.publish(responseChannel, JSON.stringify(response))
-					console.log(`🔔 FunctionRegistry[${WORKER_ID}]: Published result to ${responseChannel}`)
+					logger.log(`Published result to ${responseChannel}`)
 				} catch (error) {
-					console.error(`🔔 FunctionRegistry[${WORKER_ID}]: Error handling function call:`, error)
+					logger.error(`Error handling function call:`, error)
 
 					// Send error response if we can parse the message
 					try {
@@ -180,15 +180,15 @@ class FunctionRegistry {
 						const errorResponse = { callId, error: error.message, success: false }
 						await this.publisher!.publish(responseChannel, JSON.stringify(errorResponse))
 					} catch (parseError) {
-						console.error(`🔔 FunctionRegistry[${WORKER_ID}]: Could not send error response:`, parseError)
+						logger.error(`Could not send error response:`, parseError)
 					}
 				}
 			})
 
 			this.isSubscriberSetup = true
-			console.log(`🔔 FunctionRegistry[${WORKER_ID}]: Function call listener setup complete`)
+			logger.log(`Function call listener setup complete`)
 		} catch (error) {
-			console.error(`🔔 FunctionRegistry[${WORKER_ID}]: Failed to setup function call listener:`, error)
+			logger.error(`Failed to setup function call listener:`, error)
 		}
 	}
 	// ===== REDIS STREAMS METHODS =====
@@ -206,13 +206,13 @@ class FunctionRegistry {
 		try {
 			// Create consumer group (MKSTREAM creates the stream if it doesn't exist)
 			await this.client.xGroupCreate(streamKey, groupName, "$", { MKSTREAM: true })
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Created stream and group: ${streamKey} -> ${groupName}`)
+			logger.log(`Created stream and group: ${streamKey} -> ${groupName}`)
 		} catch (error: any) {
 			// Ignore "BUSYGROUP" error if group already exists
 			if (!error.message?.includes("BUSYGROUP")) {
 				throw error
 			}
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stream group already exists: ${streamKey} -> ${groupName}`)
+			logger.log(`Stream group already exists: ${streamKey} -> ${groupName}`)
 		}
 
 		return streamKey
@@ -235,7 +235,7 @@ class FunctionRegistry {
 			timestamp: Date.now().toString(),
 		})
 
-		console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Added call to stream ${streamKey}: ${messageId}`)
+		logger.log(`Added call to stream ${streamKey}: ${messageId}`)
 	}
 
 	/**
@@ -257,10 +257,10 @@ class FunctionRegistry {
 				return []
 			}
 
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Read ${streamMessages.messages.length} messages from ${streamKey}`)
+			logger.log(`Read ${streamMessages.messages.length} messages from ${streamKey}`)
 			return streamMessages.messages
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error reading from stream ${streamKey}:`, error)
+			logger.error(`Error reading from stream ${streamKey}:`, error)
 			return []
 		}
 	}
@@ -274,9 +274,9 @@ class FunctionRegistry {
 
 		try {
 			await this.client.xAck(streamKey, groupName, messageId)
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Acknowledged message ${messageId} in ${streamKey}`)
+			logger.log(`Acknowledged message ${messageId} in ${streamKey}`)
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error acknowledging message ${messageId}:`, error)
+			logger.error(`Error acknowledging message ${messageId}:`, error)
 		}
 	}
 
@@ -290,9 +290,9 @@ class FunctionRegistry {
 		try {
 			await this.client.lPush(responseChannel, JSON.stringify(response))
 			await this.client.expire(responseChannel, 60) // 1 minute expiry
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Published response to ${responseChannel}`)
+			logger.log(`Published response to ${responseChannel}`)
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error publishing response:`, error)
+			logger.error(`Error publishing response:`, error)
 		}
 	}
 
@@ -311,10 +311,10 @@ class FunctionRegistry {
 			}
 
 			const response = JSON.parse(result.element)
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Received response from ${responseChannel}:`, response)
+			logger.log(`Received response from ${responseChannel}:`, response)
 			return response
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error waiting for response:`, error)
+			logger.error(`Error waiting for response:`, error)
 			throw error
 		}
 	}
@@ -336,12 +336,12 @@ class FunctionRegistry {
 					await this.client.hSet(metadataKey, "lastHeartbeat", Date.now().toString())
 				}
 			} catch (error) {
-				console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Heartbeat error for ${functionName}:`, error)
+				logger.error(`Heartbeat error for ${functionName}:`, error)
 			}
 		}, 10000) // Every 10 seconds
 
 		this.heartbeatIntervals.set(heartbeatKey, interval)
-		console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Started heartbeat for ${functionName}`)
+		logger.log(`Started heartbeat for ${functionName}`)
 	}
 
 	/**
@@ -354,7 +354,7 @@ class FunctionRegistry {
 		if (interval) {
 			clearInterval(interval)
 			this.heartbeatIntervals.delete(heartbeatKey)
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stopped heartbeat for ${functionName}`)
+			logger.log(`Stopped heartbeat for ${functionName}`)
 		}
 	}
 
@@ -374,7 +374,7 @@ class FunctionRegistry {
 			const age = Date.now() - parseInt(lastHeartbeat)
 			return age <= maxAgeMs
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error checking worker health:`, error)
+			logger.error(`Error checking worker health:`, error)
 			return false
 		}
 	}
@@ -389,12 +389,12 @@ class FunctionRegistry {
 
 			// Destroy consumer group
 			await this.client.xGroupDestroy(streamKey, groupName)
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Destroyed consumer group ${groupName} for ${streamKey}`)
+			logger.log(`Destroyed consumer group ${groupName} for ${streamKey}`)
 
 			// Optionally delete the stream if no other groups exist
 			// Note: We might want to keep the stream for other consumer groups
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error cleaning up stream:`, error)
+			logger.error(`Error cleaning up stream:`, error)
 		}
 	}
 
@@ -407,9 +407,9 @@ class FunctionRegistry {
 			if (!this.client) return
 
 			await this.client.xTrim(streamKey, "MAXLEN", maxLength)
-			console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Trimmed stream ${streamKey} to ~${maxLength} messages`)
+			logger.log(`Trimmed stream ${streamKey} to ~${maxLength} messages`)
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error trimming stream:`, error)
+			logger.error(`Error trimming stream:`, error)
 		}
 	}
 
@@ -424,7 +424,7 @@ class FunctionRegistry {
 			const claimed = await this.client.xAutoClaim(streamKey, groupName, "reclaimer", idleTimeMs, "0-0", { COUNT: 100 })
 
 			if (claimed.messages && claimed.messages.length > 0) {
-				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Reclaimed ${claimed.messages.length} pending messages from ${streamKey}`)
+				logger.log(`Reclaimed ${claimed.messages.length} pending messages from ${streamKey}`)
 
 				// Re-add claimed messages to the stream for reprocessing
 				for (const message of claimed.messages) {
@@ -432,7 +432,7 @@ class FunctionRegistry {
 				}
 			}
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error reclaiming pending messages:`, error)
+			logger.error(`Error reclaiming pending messages:`, error)
 		}
 	}
 
@@ -446,7 +446,7 @@ class FunctionRegistry {
 
 			return await this.client.sMembers(`function:${functionName}`)
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error getting available workers:`, error)
+			logger.error(`Error getting available workers:`, error)
 			return []
 		}
 	}
@@ -462,7 +462,7 @@ class FunctionRegistry {
 			// Check if stream exists
 			const streamExists = await this.client.exists(streamKey)
 			if (!streamExists) {
-				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stream does not exist: ${streamKey}`)
+				logger.log(`Stream does not exist: ${streamKey}`)
 				return false
 			}
 
@@ -472,20 +472,20 @@ class FunctionRegistry {
 				const targetGroup = groups.find((group: any) => group.name === groupName)
 
 				if (!targetGroup) {
-					console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Consumer group does not exist: ${groupName}`)
+					logger.log(`Consumer group does not exist: ${groupName}`)
 					return false
 				}
 
 				// Simplified check - just verify the group exists (don't check for active consumers)
 				const isReady = true
-				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Stream ${streamKey} ready: ${isReady} (group exists)`)
+				logger.log(`Stream ${streamKey} ready: ${isReady} (group exists)`)
 				return isReady
 			} catch (groupError) {
-				console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Error checking consumer group info: ${groupError.message}`)
+				logger.log(`Error checking consumer group info: ${groupError.message}`)
 				return false
 			}
 		} catch (error) {
-			console.error(`🌊 FunctionRegistry[${WORKER_ID}]: Error checking stream readiness:`, error)
+			logger.error(`Error checking stream readiness:`, error)
 			return false
 		}
 	}
@@ -506,7 +506,7 @@ class FunctionRegistry {
 			await new Promise((resolve) => setTimeout(resolve, checkInterval))
 		}
 
-		console.log(`🌊 FunctionRegistry[${WORKER_ID}]: Timeout waiting for stream to be ready: ${streamKey}`)
+		logger.log(`Timeout waiting for stream to be ready: ${streamKey}`)
 		return false
 	}
 
@@ -554,7 +554,7 @@ class FunctionRegistry {
 			const metadataKey = `function:meta:${WORKER_ID}:${functionName}`
 			const functionSetKey = `function:${functionName}`
 
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Starting pipelined Redis operations at ${Date.now()}`)
+			logger.log(`Starting pipelined Redis operations at ${Date.now()}`)
 			const startTime = Date.now()
 
 			// Use Redis pipelining to batch all commands into a single round-trip
@@ -573,25 +573,25 @@ class FunctionRegistry {
 			await pipeline.exec()
 
 			const endTime = Date.now()
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Pipelined Redis operations completed in ${endTime - startTime}ms`)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata stored: ${metadataKey}`)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Added to function set: ${functionSetKey}`)
+			logger.log(`Pipelined Redis operations completed in ${endTime - startTime}ms`)
+			logger.log(`Function metadata stored: ${metadataKey}`)
+			logger.log(`Added to function set: ${functionSetKey}`)
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Failed to register function in Redis:`, error)
+			logger.error(`Failed to register function in Redis:`, error)
 			// Continue with in-memory only if Redis fails
 		}
 	}
 
 	async unregisterFunction(functionName: string, executionId: string): Promise<void> {
 		const key = `${functionName}-${executionId}`
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Unregistering function: ${key}`)
+		logger.log(`Unregistering function: ${key}`)
 
 		// Remove from memory
 		this.listeners.delete(key)
 
 		// Remove from Redis (only in queue mode)
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis metadata cleanup`)
+			logger.log(`Queue mode disabled, skipping Redis metadata cleanup`)
 			return
 		}
 
@@ -603,7 +603,7 @@ class FunctionRegistry {
 			const metadataKey = `function:meta:${WORKER_ID}:${functionName}`
 			const functionSetKey = `function:${functionName}`
 
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Starting pipelined Redis cleanup operations at ${Date.now()}`)
+			logger.log(`Starting pipelined Redis cleanup operations at ${Date.now()}`)
 			const startTime = Date.now()
 
 			// Use Redis pipelining to batch cleanup commands
@@ -614,11 +614,11 @@ class FunctionRegistry {
 			await pipeline.exec()
 
 			const endTime = Date.now()
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Pipelined Redis cleanup completed in ${endTime - startTime}ms`)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Function metadata removed: ${metadataKey}`)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Removed from function set: ${functionSetKey}`)
+			logger.log(`Pipelined Redis cleanup completed in ${endTime - startTime}ms`)
+			logger.log(`Function metadata removed: ${metadataKey}`)
+			logger.log(`Removed from function set: ${functionSetKey}`)
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Failed to unregister function from Redis:`, error)
+			logger.error(`Failed to unregister function from Redis:`, error)
 		}
 	}
 
@@ -628,7 +628,7 @@ class FunctionRegistry {
 		parameters: Record<string, any>,
 		inputItem: INodeExecutionData
 	): Promise<{ result: INodeExecutionData[] | null; actualExecutionId: string }> {
-		console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Calling function: ${functionName}`)
+		logger.log(`Calling function: ${functionName}`)
 
 		// Generate unique call ID
 		const callId = `${WORKER_ID}_${Date.now()}_${this.nextCallId++}`
@@ -638,7 +638,7 @@ class FunctionRegistry {
 		const localListener = this.listeners.get(localKey)
 
 		if (localListener) {
-			console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Found function locally, executing directly`)
+			logger.log(`Found function locally, executing directly`)
 			try {
 				this.callContextStack.push(callId)
 				const result = await localListener.callback(parameters, inputItem)
@@ -652,11 +652,11 @@ class FunctionRegistry {
 
 		// Try cross-worker call via Redis (only in queue mode)
 		if (!isQueueModeEnabled()) {
-			console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Function not found locally and queue mode disabled`)
+			logger.log(`Function not found locally and queue mode disabled`)
 			return { result: null, actualExecutionId: callId }
 		}
 
-		console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Function not found locally, trying Redis pub/sub`)
+		logger.log(`Function not found locally, trying Redis pub/sub`)
 
 		try {
 			await this.ensureRedisConnection()
@@ -669,13 +669,13 @@ class FunctionRegistry {
 			const availableWorkers = await this.client.sMembers(functionSetKey)
 
 			if (availableWorkers.length === 0) {
-				console.log(`🔧 FunctionRegistry[${WORKER_ID}]: No workers available for function: ${functionName}`)
+				logger.log(`No workers available for function: ${functionName}`)
 				return { result: null, actualExecutionId: callId }
 			}
 
 			// Pick a worker (simple round-robin by using first available)
 			const targetWorker = availableWorkers[0]
-			console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Targeting worker: ${targetWorker}`)
+			logger.log(`Targeting worker: ${targetWorker}`)
 
 			// Set up response channel and timeout
 			const responseChannel = `function:response:${callId}`
@@ -688,7 +688,7 @@ class FunctionRegistry {
 				const timeout = setTimeout(() => {
 					if (!resolved) {
 						resolved = true
-						console.error(`🔧 FunctionRegistry[${WORKER_ID}]: Function call timed out: ${functionName}`)
+						logger.error(`Function call timed out: ${functionName}`)
 						resolve({ result: null, actualExecutionId: callId })
 					}
 				}, timeoutMs)
@@ -704,7 +704,7 @@ class FunctionRegistry {
 
 					try {
 						const response = JSON.parse(message)
-						console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Received response:`, response)
+						logger.log(`Received response:`, response)
 						await responseSubscriber.disconnect()
 
 						if (response.success) {
@@ -713,7 +713,7 @@ class FunctionRegistry {
 							reject(new Error(response.error || "Function call failed"))
 						}
 					} catch (error) {
-						console.error(`🔧 FunctionRegistry[${WORKER_ID}]: Error parsing response:`, error)
+						logger.error(`Error parsing response:`, error)
 						await responseSubscriber.disconnect()
 						resolve({ result: null, actualExecutionId: callId })
 					}
@@ -728,17 +728,17 @@ class FunctionRegistry {
 					responseChannel,
 				}
 				const callChannel = `function:call:${targetWorker}:${functionName}`
-				console.log(`🔧 FunctionRegistry[${WORKER_ID}]: Publishing to ${callChannel}`)
+				logger.log(`Publishing to ${callChannel}`)
 				await this.publisher!.publish(callChannel, JSON.stringify(request))
 			})
 		} catch (error) {
-			console.error(`🔧 FunctionRegistry[${WORKER_ID}]: Error with Redis function call:`, error)
+			logger.error(`Error with Redis function call:`, error)
 			return { result: null, actualExecutionId: callId }
 		}
 	}
 
 	async getAvailableFunctions(scope?: string): Promise<Array<{ name: string; value: string }>> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Getting available functions for scope: ${scope || "all"}`)
+		logger.log(`Getting available functions for scope: ${scope || "all"}`)
 		const functionNames = new Set<string>()
 
 		// Get functions from memory (local process)
@@ -756,7 +756,7 @@ class FunctionRegistry {
 				await this.ensureRedisConnection()
 				if (this.client) {
 					const functionKeys = await this.client.keys("function:meta:*")
-					console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found ${functionKeys.length} function metadata keys`)
+					logger.log(`Found ${functionKeys.length} function metadata keys`)
 
 					for (const key of functionKeys) {
 						if (key.startsWith("function:meta:")) {
@@ -770,15 +770,15 @@ class FunctionRegistry {
 									// Get the metadata to check the execution ID (scope)
 									try {
 										const metadata = await this.client.hGetAll(key)
-										console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Checking function ${functionName}, metadata executionId: ${metadata.executionId}, looking for scope: ${scope}`)
+										logger.log(`Checking function ${functionName}, metadata executionId: ${metadata.executionId}, looking for scope: ${scope}`)
 										if (metadata && metadata.executionId === scope) {
-											console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Function ${functionName} matches scope ${scope}`)
+											logger.log(`✅ Function ${functionName} matches scope ${scope}`)
 											functionNames.add(functionName)
 										} else {
-											console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Function ${functionName} does not match scope ${scope}`)
+											logger.log(`❌ Function ${functionName} does not match scope ${scope}`)
 										}
 									} catch (metaError) {
-										console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error reading metadata for ${key}:`, metaError)
+										logger.error(`Error reading metadata for ${key}:`, metaError)
 									}
 								} else {
 									functionNames.add(functionName)
@@ -788,11 +788,11 @@ class FunctionRegistry {
 					}
 				}
 			} catch (error) {
-				console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting functions from Redis:`, error)
+				logger.error(`Error getting functions from Redis:`, error)
 			}
 		}
 
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Found functions for scope '${scope || "all"}':`, Array.from(functionNames))
+		logger.log(`Found functions for scope '${scope || "all"}':`, Array.from(functionNames))
 		return Array.from(functionNames).map((name) => ({
 			name,
 			value: name,
@@ -821,7 +821,7 @@ class FunctionRegistry {
 					}
 				}
 			} catch (error) {
-				console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting function parameters from Redis:`, error)
+				logger.error(`Error getting function parameters from Redis:`, error)
 			}
 		}
 
@@ -830,12 +830,12 @@ class FunctionRegistry {
 
 	// Return value methods (keeping existing implementation)
 	async setFunctionReturnValue(executionId: string, returnValue: any): Promise<void> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ SETTING return value for execution: ${executionId}`)
+		logger.log(`⭐ SETTING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, storing return value in memory`)
+			logger.log(`Queue mode disabled, storing return value in memory`)
 			this.inMemoryReturnValues.set(executionId, returnValue)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Return value stored in memory: ${executionId}`)
+			logger.log(`⭐ Return value stored in memory: ${executionId}`)
 			return
 		}
 
@@ -845,27 +845,27 @@ class FunctionRegistry {
 
 			const redisKey = `return:${executionId}`
 			await this.client.set(redisKey, JSON.stringify(returnValue), { EX: 300 }) // 5 minute expiry
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Return value stored in Redis: ${redisKey}`)
+			logger.log(`⭐ Return value stored in Redis: ${redisKey}`)
 
 			// Publish to notify waiting processes
 			await this.client.publish(`return-pubsub:${executionId}`, JSON.stringify(returnValue))
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Return value published to pubsub`)
+			logger.log(`⭐ Return value published to pubsub`)
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Failed to store return value in Redis:`, error)
+			logger.error(`Failed to store return value in Redis:`, error)
 		}
 	}
 
 	async getFunctionReturnValue(executionId: string): Promise<any | null> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 GETTING return value for execution: ${executionId}`)
+		logger.log(`🔍 GETTING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, checking in-memory return values`)
+			logger.log(`Queue mode disabled, checking in-memory return values`)
 			const returnValue = this.inMemoryReturnValues.get(executionId)
 			if (returnValue !== undefined) {
-				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 Return value found in memory:`, returnValue)
+				logger.log(`🔍 Return value found in memory:`, returnValue)
 				return returnValue
 			} else {
-				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 No return value found in memory`)
+				logger.log(`🔍 No return value found in memory`)
 				return null
 			}
 		}
@@ -879,24 +879,24 @@ class FunctionRegistry {
 
 			if (returnValueJson) {
 				const returnValue = JSON.parse(returnValueJson)
-				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 Return value found in Redis:`, returnValue)
+				logger.log(`🔍 Return value found in Redis:`, returnValue)
 				return returnValue
 			}
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error getting return value from Redis:`, error)
+			logger.error(`Error getting return value from Redis:`, error)
 		}
 
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 No return value found`)
+		logger.log(`🔍 No return value found`)
 		return null
 	}
 
 	async clearFunctionReturnValue(executionId: string): Promise<void> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ CLEARING return value for execution: ${executionId}`)
+		logger.log(`🗑️ CLEARING return value for execution: ${executionId}`)
 
 		if (!isQueueModeEnabled()) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, clearing in-memory return value`)
+			logger.log(`Queue mode disabled, clearing in-memory return value`)
 			const wasDeleted = this.inMemoryReturnValues.delete(executionId)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ Return value cleared from memory: ${wasDeleted}`)
+			logger.log(`🗑️ Return value cleared from memory: ${wasDeleted}`)
 			return
 		}
 
@@ -906,38 +906,38 @@ class FunctionRegistry {
 
 			const redisKey = `return:${executionId}`
 			await this.client.del(redisKey)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ Return value cleared from Redis`)
+			logger.log(`🗑️ Return value cleared from Redis`)
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error clearing return value from Redis:`, error)
+			logger.error(`Error clearing return value from Redis:`, error)
 		}
 	}
 
 	// Stack management methods (keeping existing implementation)
 	pushCurrentFunctionExecution(executionId: string): void {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Pushing function execution to stack: ${executionId}`)
+		logger.log(`Pushing function execution to stack: ${executionId}`)
 		this.currentFunctionExecutionStack.push(executionId)
 	}
 
 	getCurrentFunctionExecution(): string | null {
 		const current = this.currentFunctionExecutionStack[this.currentFunctionExecutionStack.length - 1] ?? null
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Getting current function execution: ${current}`)
+		logger.log(`Getting current function execution: ${current}`)
 		return current
 	}
 
 	popCurrentFunctionExecution(): string | null {
 		const popped = this.currentFunctionExecutionStack.pop() ?? null
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Popped function execution from stack: ${popped}`)
+		logger.log(`Popped function execution from stack: ${popped}`)
 		return popped
 	}
 
 	clearCurrentFunctionExecution(): void {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Clearing entire function execution stack`)
+		logger.log(`Clearing entire function execution stack`)
 		this.currentFunctionExecutionStack = []
 	}
 
 	generateNestedCallId(baseExecutionId: string): string {
 		const nestedId = `${baseExecutionId}_nested_${this.nextCallId++}`
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Generated nested call ID: ${nestedId}`)
+		logger.log(`Generated nested call ID: ${nestedId}`)
 		return nestedId
 	}
 
@@ -947,20 +947,20 @@ class FunctionRegistry {
 
 	// Promise-based return handling methods
 	async createReturnPromise(executionId: string): Promise<any> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Creating return promise for execution: ${executionId}`)
+		logger.log(`⭐ Creating return promise for execution: ${executionId}`)
 
 		if (this.returnPromises.has(executionId)) {
-			console.warn(`🎯 FunctionRegistry[${WORKER_ID}]: ⚠️ Promise already exists for execution: ${executionId}`)
+			logger.warn(`⚠️ Promise already exists for execution: ${executionId}`)
 			return this.waitForReturn(executionId)
 		}
 
 		return new Promise(async (resolve, reject) => {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Promise created, storing resolve/reject handlers`)
+			logger.log(`⭐ Promise created, storing resolve/reject handlers`)
 			this.returnPromises.set(executionId, { resolve, reject })
 
 			// Also set up Redis subscription for cross-process return values (only in queue mode)
 			if (!isQueueModeEnabled()) {
-				console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Queue mode disabled, skipping Redis subscription setup`)
+				logger.log(`Queue mode disabled, skipping Redis subscription setup`)
 				return
 			}
 
@@ -971,7 +971,7 @@ class FunctionRegistry {
 					await subscriber.connect()
 
 					await subscriber.subscribe(`return-pubsub:${executionId}`, (message) => {
-						console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ⭐ Received return value via pubsub:`, message)
+						logger.log(`⭐ Received return value via pubsub:`, message)
 						try {
 							const returnValue = JSON.parse(message)
 							const promiseHandlers = this.returnPromises.get(executionId)
@@ -980,31 +980,31 @@ class FunctionRegistry {
 								this.returnPromises.delete(executionId)
 							}
 						} catch (error) {
-							console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error parsing pubsub message:`, error)
+							logger.error(`Error parsing pubsub message:`, error)
 						}
 						subscriber.disconnect()
 					})
 				}
 			} catch (error) {
-				console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error setting up Redis subscription:`, error)
+				logger.error(`Error setting up Redis subscription:`, error)
 			}
 		})
 	}
 
 	async waitForReturn(executionId: string): Promise<any> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 Getting return promise for execution: ${executionId}`)
+		logger.log(`🔍 Getting return promise for execution: ${executionId}`)
 
 		// Check if value is already available in Redis
 		const existingValue = await this.getFunctionReturnValue(executionId)
 		if (existingValue !== null) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 Return value already available:`, existingValue)
+			logger.log(`🔍 Return value already available:`, existingValue)
 			return existingValue
 		}
 
 		// Check if promise exists
 		const promiseHandlers = this.returnPromises.get(executionId)
 		if (!promiseHandlers) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🔍 No promise found, creating new one`)
+			logger.log(`🔍 No promise found, creating new one`)
 			return this.createReturnPromise(executionId)
 		}
 
@@ -1026,7 +1026,7 @@ class FunctionRegistry {
 	}
 
 	async resolveReturn(executionId: string, value: any): Promise<void> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Resolving return promise for execution: ${executionId} with value:`, value)
+		logger.log(`✅ Resolving return promise for execution: ${executionId} with value:`, value)
 
 		// Store the value in Redis
 		await this.setFunctionReturnValue(executionId, value)
@@ -1034,37 +1034,37 @@ class FunctionRegistry {
 		// Resolve the promise if it exists
 		const promiseHandlers = this.returnPromises.get(executionId)
 		if (promiseHandlers) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Promise found, resolving...`)
+			logger.log(`✅ Promise found, resolving...`)
 			promiseHandlers.resolve(value)
 			this.returnPromises.delete(executionId)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ✅ Promise resolved and cleaned up`)
+			logger.log(`✅ Promise resolved and cleaned up`)
 		} else {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🟡 No promise found for execution, value stored for later retrieval`)
+			logger.log(`🟡 No promise found for execution, value stored for later retrieval`)
 		}
 	}
 
 	async rejectReturn(executionId: string, error: any): Promise<void> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Rejecting return promise for execution: ${executionId} with error:`, error)
+		logger.log(`❌ Rejecting return promise for execution: ${executionId} with error:`, error)
 
 		// Reject the promise if it exists
 		const promiseHandlers = this.returnPromises.get(executionId)
 		if (promiseHandlers) {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Promise found, rejecting...`)
+			logger.log(`❌ Promise found, rejecting...`)
 			promiseHandlers.reject(error)
 			this.returnPromises.delete(executionId)
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: ❌ Promise rejected and cleaned up`)
+			logger.log(`❌ Promise rejected and cleaned up`)
 		} else {
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🟡 No promise found for execution, error not propagated`)
+			logger.log(`🟡 No promise found for execution, error not propagated`)
 		}
 	}
 
 	cleanupReturnPromise(executionId: string): void {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: 🗑️ Cleaning up return promise for execution: ${executionId}`)
+		logger.log(`🗑️ Cleaning up return promise for execution: ${executionId}`)
 		this.returnPromises.delete(executionId)
 	}
 
 	async disconnect(): Promise<void> {
-		console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Disconnecting from Redis`)
+		logger.log(`Disconnecting from Redis`)
 
 		try {
 			// Stop all heartbeats
@@ -1087,9 +1087,9 @@ class FunctionRegistry {
 			}
 			this.isConnected = false
 			this.isSubscriberSetup = false
-			console.log(`🎯 FunctionRegistry[${WORKER_ID}]: Disconnected from Redis`)
+			logger.log(`Disconnected from Redis`)
 		} catch (error) {
-			console.error(`🎯 FunctionRegistry[${WORKER_ID}]: Error disconnecting from Redis:`, error)
+			logger.error(`Error disconnecting from Redis:`, error)
 		}
 	}
 }
