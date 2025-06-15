@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, getRedisHost, enableRedisMode, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, getRedisHost } from "../FunctionRegistryFactory"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -356,21 +356,6 @@ export class CallFunction implements INodeType {
 		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Starting execution`)
 		const items = this.getInputData()
 		console.log(`🔧 CallFunction[${nodeId}/${nodeName}]: Input items count =`, items.length)
-
-		// Auto-enable queue mode if not already enabled
-		// This ensures CallFunction can find functions registered in Redis by other workers
-		if (!isQueueModeEnabled()) {
-			// Check if there's Redis host metadata in the first item
-			let metadataHost = "redis"
-			if (items[0]?.json?._function_call_metadata && typeof items[0].json._function_call_metadata === "object") {
-				const metadata = items[0].json._function_call_metadata as any
-				if (metadata.redis_host && typeof metadata.redis_host === "string") {
-					metadataHost = metadata.redis_host
-				}
-			}
-			enableRedisMode(metadataHost)
-			console.log(`🌊 CallFunction[${nodeId}/${nodeName}]: Auto-enabled Redis queue mode (host: ${metadataHost})`)
-		}
 
 		// Debug: Log all node parameters
 		try {

@@ -7,7 +7,7 @@ import {
 	type ITriggerFunctions,
 	type ITriggerResponse,
 } from "n8n-workflow"
-import { getFunctionRegistry, enableRedisMode, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, enableRedisMode, getRedisHost } from "../FunctionRegistryFactory"
 import { type ParameterDefinition } from "../FunctionRegistry"
 
 export class Function implements INodeType {
@@ -143,13 +143,6 @@ export class Function implements INodeType {
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		console.log("🌊 Function: Starting stream-based trigger setup")
-
-		// Auto-enable queue mode if not already enabled
-		// This ensures Function triggers register in Redis even if ConfigureFunctions hasn't run yet
-		if (!isQueueModeEnabled()) {
-			enableRedisMode() // Uses default "redis" host
-			console.log("🌊 Function: Auto-enabled Redis queue mode for trigger registration")
-		}
 
 		// Get function configuration
 		const globalFunction = this.getNodeParameter("globalFunction", 0) as boolean
