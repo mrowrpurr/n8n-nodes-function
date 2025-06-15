@@ -1,4 +1,4 @@
-import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
+import { NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse, NodeOperationError } from "n8n-workflow"
 import { FUNCTIONS_REDIS_INFO, FunctionsRedisCredentialsData } from "../../credentials/FunctionsRedisCredentials.credentials"
 import { disableRedisMode, getFunctionRegistry, setRedisConfig, setQueueMode, resetGlobalConfig } from "../FunctionRegistryFactory"
 import { configureFunctionsLogger as logger } from "../Logger"
@@ -126,10 +126,12 @@ export class ConfigureFunctions implements INodeType {
 			setQueueMode(true)
 			logger.info("✅ Redis mode enabled via FunctionRegistryFactory with config:", redisConfig)
 
-			// Store global config in Redis for workers to read
+			// Test Redis connection and fail activation if it doesn't work
 			try {
 				const registry = await getFunctionRegistry()
-				await registry.testRedisConnection() // Ensure Redis is connected
+				logger.info("🔍 Testing Redis connection before activation...")
+				await registry.testRedisConnection() // This will throw if connection fails
+				logger.info("✅ Redis connection test successful")
 
 				// Store global configuration that workers will read
 				const globalConfig = {
@@ -147,7 +149,11 @@ export class ConfigureFunctions implements INodeType {
 					logger.info("✅ Global config stored in Redis")
 				}
 			} catch (error) {
-				logger.error("Failed to store global config in Redis:", error)
+				logger.error("❌ Redis connection test failed:", error.message)
+				throw new NodeOperationError(
+					this.getNode(),
+					`Failed to connect to Redis at ${redisConfig.host}:${redisConfig.port}. Please check your Redis credentials and ensure Redis is running. Error: ${error.message}`
+				)
 			}
 
 			logger.debug("🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
