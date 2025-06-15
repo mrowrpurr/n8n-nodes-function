@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, getRedisHost, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
 
 export class CallFunction implements INodeType {

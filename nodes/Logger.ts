@@ -71,4 +71,3 @@ export const functionRegistryFactoryLogger = createLogger("🏭 FunctionRegistry
 export const functionNodeLogger = createLogger("🌊 Function")
 export const callFunctionLogger = createLogger("🔧 CallFunction")
 export const returnFromFunctionLogger = createLogger("🌊 ReturnFromFunction")
-export const configureFunctionsLogger = createLogger("⚙️ ConfigureFunctions")

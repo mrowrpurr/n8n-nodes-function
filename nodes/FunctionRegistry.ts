@@ -57,7 +57,7 @@ class FunctionRegistry {
 	}
 
 	/**
-	 * Set Redis configuration (public method for ConfigureFunctions node)
+	 * Set Redis configuration (public method for bootstrap)
 	 */
 	setRedisConfig(config: RedisConfig): void {
 		logger.log(`Setting Redis config - host: ${config.host}, port: ${config.port}, database: ${config.database}, user: ${config.user}, ssl: ${config.ssl}`)
@@ -68,7 +68,7 @@ class FunctionRegistry {
 	}
 
 	/**
-	 * Test Redis connection (public method for ConfigureFunctions node)
+	 * Test Redis connection (public method for bootstrap)
 	 */
 	async testRedisConnection(): Promise<void> {
 		// If queue mode is disabled, throw error immediately
