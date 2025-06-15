@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { getInstance as getFunctionRegistry } from "../FunctionRegistry"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -179,16 +179,9 @@ export class CallFunction implements INodeType {
 					// Only show global functions
 					availableFunctions = await registry.getAvailableFunctions("__global__")
 				} else {
-					// Show local functions (current execution and __active__)
-					const executionId = this.getExecutionId()
-					const effectiveExecutionId = executionId ?? "__active__"
-					availableFunctions = await registry.getAvailableFunctions(effectiveExecutionId)
-
-					// Also include __active__ functions if we're in a real execution
-					if (executionId && effectiveExecutionId !== "__active__") {
-						const activeFunctions = await registry.getAvailableFunctions("__active__")
-						availableFunctions = [...availableFunctions, ...activeFunctions]
-					}
+					// Show local functions (current workflow scope)
+					const workflowId = this.getWorkflow().id || "unknown"
+					availableFunctions = await registry.getAvailableFunctions(workflowId)
 
 					// If no local functions found, add a helpful message
 					if (availableFunctions.length === 0) {
@@ -229,14 +222,8 @@ export class CallFunction implements INodeType {
 				if (globalFunction) {
 					parameters = await registry.getFunctionParameters(functionName, "__global__")
 				} else {
-					const executionId = this.getExecutionId()
-					const effectiveExecutionId = executionId ?? "__active__"
-					parameters = await registry.getFunctionParameters(functionName, effectiveExecutionId)
-
-					// If not found with current execution, try __active__ fallback
-					if (parameters.length === 0 && effectiveExecutionId !== "__active__") {
-						parameters = await registry.getFunctionParameters(functionName, "__active__")
-					}
+					const workflowId = this.getWorkflow().id || "unknown"
+					parameters = await registry.getFunctionParameters(functionName, workflowId)
 				}
 
 				console.log("🔧 CallFunction: Found parameters:", parameters)
@@ -343,14 +330,8 @@ export class CallFunction implements INodeType {
 			if (globalFunction) {
 				functionParameterDefs = await registry.getFunctionParameters(functionName, "__global__")
 			} else {
-				const executionId = this.getExecutionId()
-				const effectiveExecutionId = executionId ?? "__active__"
-				functionParameterDefs = await registry.getFunctionParameters(functionName, effectiveExecutionId)
-
-				// If not found with current execution, try __active__ fallback
-				if (functionParameterDefs.length === 0 && effectiveExecutionId !== "__active__") {
-					functionParameterDefs = await registry.getFunctionParameters(functionName, "__active__")
-				}
+				const workflowId = this.getWorkflow().id || "unknown"
+				functionParameterDefs = await registry.getFunctionParameters(functionName, workflowId)
 			}
 
 			const validParameterNames = new Set(functionParameterDefs.map((p: any) => p.name))
@@ -414,78 +395,79 @@ export class CallFunction implements INodeType {
 
 			console.log("🔧 CallFunction: Final parameters =", functionParameters)
 
-			console.log("🔧 CallFunction: Implementing actual function triggering")
-			console.log("🔧 CallFunction: Calling function:", functionName, "with params:", functionParameters)
+			console.log("🌊 CallFunction: Implementing stream-based function call")
+			console.log("🌊 CallFunction: Calling function:", functionName, "with params:", functionParameters)
 
-			// Determine the execution ID to use based on global function setting
-			let targetExecutionId: string
+			// Determine the scope to use based on global function setting
+			let targetScope: string
+			let workflowId: string
 
 			if (globalFunction) {
-				targetExecutionId = "__global__"
+				targetScope = "__global__"
 			} else {
-				const executionId = this.getExecutionId()
-				targetExecutionId = executionId ?? "__active__"
+				// For non-global functions, use the current workflow ID
+				workflowId = this.getWorkflow().id || "unknown"
+				targetScope = workflowId
 			}
 
-			console.log("🔧 CallFunction: Target execution ID =", targetExecutionId)
-			console.log("🔧 CallFunction: Global function =", globalFunction)
+			console.log("🌊 CallFunction: Target scope =", targetScope)
+			console.log("🌊 CallFunction: Global function =", globalFunction)
 
-			// Use the registry instance to call the function
+			// Use the registry instance to call the function via streams
 			const item = items[itemIndex]
 
 			try {
-				// Try to call the function with target execution ID
-				let callResult = await registry.callFunction(functionName, targetExecutionId, functionParameters, item)
-				let functionResult = callResult.result
-				let actualExecutionId = callResult.actualExecutionId
+				// Generate unique call ID
+				const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+				const responseChannel = `function:response:${callId}`
+				const streamKey = `function:stream:${targetScope}:${functionName}`
 
-				// If not found and not global, try with "__active__" fallback
-				if (functionResult === null && !globalFunction && targetExecutionId !== "__active__") {
-					console.log("🔧 CallFunction: Function not found with execution ID, trying __active__ fallback")
-					callResult = await registry.callFunction(functionName, "__active__", functionParameters, item)
-					functionResult = callResult.result
-					actualExecutionId = callResult.actualExecutionId
+				console.log("🌊 CallFunction: Call ID:", callId)
+				console.log("🌊 CallFunction: Stream key:", streamKey)
+				console.log("🌊 CallFunction: Response channel:", responseChannel)
+
+				// Check if any workers are available for this function
+				const availableWorkers = await registry.getAvailableWorkers(functionName)
+
+				if (availableWorkers.length === 0) {
+					throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
 				}
 
-				if (functionResult === null) {
-					throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or not registered in this execution`)
+				// Filter workers by health check
+				const healthyWorkers = []
+				for (const workerId of availableWorkers) {
+					const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
+					if (isHealthy) {
+						healthyWorkers.push(workerId)
+					}
 				}
 
-				console.log("🔧 CallFunction: Function returned result =", functionResult)
-				console.log("🔧 CallFunction: Using execution ID for return value:", actualExecutionId)
-
-				// Check if function returned a value via ReturnFromFunction node
-				console.log("🔧 CallFunction: About to check for return value...")
-				console.log("🔧 CallFunction: Looking for return value under execution ID:", actualExecutionId)
-
-				const returnValue = await registry.getFunctionReturnValue(actualExecutionId)
-				console.log("🔧 CallFunction: Function return value retrieved =", returnValue)
-				console.log("🔧 CallFunction: Return value type:", typeof returnValue)
-				console.log("🔧 CallFunction: Return value === null?", returnValue === null)
-				console.log("🔧 CallFunction: Return value === undefined?", returnValue === undefined)
-
-				// If no return value and storeResponse is enabled, this is potentially an issue
-				if (storeResponse && returnValue === null) {
-					console.warn("🔧 CallFunction: ⚠️  storeResponse is enabled but no return value found!")
-					console.warn("🔧 CallFunction: ⚠️  This suggests either:")
-					console.warn("🔧 CallFunction: ⚠️    1. No ReturnFromFunction node is connected to the function")
-					console.warn("🔧 CallFunction: ⚠️    2. ReturnFromFunction failed to execute")
-					console.warn("🔧 CallFunction: ⚠️    3. There's a timing issue with return value storage")
+				if (healthyWorkers.length === 0) {
+					throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available`)
 				}
 
-				// Clear the return value from registry after retrieving it
-				if (returnValue !== null) {
-					console.log("🔧 CallFunction: Clearing return value from registry...")
-					await registry.clearFunctionReturnValue(actualExecutionId)
-					console.log("🔧 CallFunction: Return value cleared")
+				console.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
+
+				// Add call to stream
+				await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
+
+				console.log("🌊 CallFunction: Call added to stream, waiting for response...")
+
+				// Wait for response
+				const response = await registry.waitForResponse(responseChannel, 30) // 30 second timeout
+
+				console.log("🌊 CallFunction: Received response:", response)
+
+				if (!response.success) {
+					throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
 				}
 
 				// Start with the original item
 				let resultJson: any = { ...item.json }
 
-				// Only store the return value if storeResponse is enabled and we have a return value
-				if (storeResponse && returnValue !== null && responseVariableName && responseVariableName.trim()) {
-					resultJson[responseVariableName] = returnValue
+				// Store the response if requested
+				if (storeResponse && response.data !== null && responseVariableName && responseVariableName.trim()) {
+					resultJson[responseVariableName] = response.data
 				}
 
 				const resultItem: INodeExecutionData = {
@@ -494,7 +476,7 @@ export class CallFunction implements INodeType {
 					binary: item.binary,
 				}
 
-				console.log("🔧 CallFunction: Created result item =", resultItem)
+				console.log("🌊 CallFunction: Created result item =", resultItem)
 				returnData.push(resultItem)
 			} catch (error) {
 				console.error("🔧 CallFunction: Error calling function:", error)

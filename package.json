@@ -36,8 +36,7 @@
 		"nodes": [
 			"dist/nodes/Function/Function.node.js",
 			"dist/nodes/CallFunction/CallFunction.node.js",
-			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js",
-			"dist/nodes/ConfigureFunctions/ConfigureFunctions.node.js"
+			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js"
 		]
 	},
 	"devDependencies": {

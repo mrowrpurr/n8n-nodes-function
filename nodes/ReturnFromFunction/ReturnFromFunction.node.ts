@@ -1,5 +1,5 @@
-import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription } from "n8n-workflow"
-import { getFunctionRegistry } from "../FunctionRegistryFactory"
+import { type INodeExecutionData, NodeConnectionType, type IExecuteFunctions, type INodeType, type INodeTypeDescription, NodeOperationError } from "n8n-workflow"
+import { getInstance as getFunctionRegistry } from "../FunctionRegistry"
 
 export class ReturnFromFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -32,23 +32,53 @@ export class ReturnFromFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🔴 ReturnFromFunction: ===== STARTING EXECUTION =====")
-		console.log("🔴 ReturnFromFunction: Node execution started at:", new Date().toISOString())
+		console.log("🌊 ReturnFromFunction: ===== STARTING EXECUTION =====")
+		console.log("🌊 ReturnFromFunction: Node execution started at:", new Date().toISOString())
 
 		const items = this.getInputData()
-		console.log("🔴 ReturnFromFunction: Input items count:", items.length)
-		console.log("🔴 ReturnFromFunction: Input items:", items)
+		console.log("🌊 ReturnFromFunction: Input items count:", items.length)
+		console.log("🌊 ReturnFromFunction: Input items:", items)
 
 		const returnData: INodeExecutionData[] = []
+		const registry = getFunctionRegistry()
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			console.log(`🔴 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)
+			console.log(`🌊 ReturnFromFunction: Processing item ${itemIndex + 1}/${items.length}`)
 
 			const returnCode = this.getNodeParameter("returnCode", itemIndex) as string
 			const item = items[itemIndex]
 
-			console.log("🔴 ReturnFromFunction: Return code =", returnCode)
-			console.log("🔴 ReturnFromFunction: Processing item =", item)
+			console.log("🌊 ReturnFromFunction: Return code =", returnCode)
+			console.log("🌊 ReturnFromFunction: Processing item =", item)
+
+			// Get call context from the item's _functionCall field
+			const functionCallData = item.json._functionCall as
+				| {
+						callId: string
+						functionName: string
+						timestamp: number
+						responseChannel: string
+						messageId: string
+						streamKey: string
+						groupName: string
+				  }
+				| undefined
+
+			if (!functionCallData || !functionCallData.responseChannel) {
+				throw new NodeOperationError(this.getNode(), "ReturnFromFunction must be used within a Function that was called via CallFunction")
+			}
+
+			console.log("🌊 ReturnFromFunction: Function call data:", functionCallData)
+
+			// Extract call context
+			const callContext = {
+				callId: functionCallData.callId,
+				responseChannel: functionCallData.responseChannel,
+				messageId: functionCallData.messageId,
+				streamKey: functionCallData.streamKey,
+				groupName: functionCallData.groupName,
+				functionName: functionCallData.functionName,
+			}
 
 			// Execute the JavaScript code to get the return value
 			let parsedReturnValue: any
@@ -60,9 +90,9 @@ export class ReturnFromFunction implements INodeType {
 					$index: itemIndex,
 					$item: item,
 					console: {
-						log: (...args: any[]) => console.log("🎯 ReturnFromFunction Code:", ...args),
-						error: (...args: any[]) => console.error("🎯 ReturnFromFunction Code:", ...args),
-						warn: (...args: any[]) => console.warn("🎯 ReturnFromFunction Code:", ...args),
+						log: (...args: any[]) => console.log("🌊 ReturnFromFunction Code:", ...args),
+						error: (...args: any[]) => console.error("🌊 ReturnFromFunction Code:", ...args),
+						warn: (...args: any[]) => console.warn("🌊 ReturnFromFunction Code:", ...args),
 					},
 					Date,
 					Math,
@@ -83,105 +113,62 @@ export class ReturnFromFunction implements INodeType {
 				`
 
 				parsedReturnValue = eval(wrappedCode)(context)
-				console.log("🎯 ReturnFromFunction: Code execution result =", parsedReturnValue)
+				console.log("🌊 ReturnFromFunction: Code execution result =", parsedReturnValue)
 			} catch (error) {
-				console.error("🔴 ReturnFromFunction: Code execution error:", error)
+				console.error("🌊 ReturnFromFunction: Code execution error:", error)
 
-				// Get execution ID for error handling
-				const registry = getFunctionRegistry()
-				const functionExecutionId = registry.getCurrentFunctionExecution()
-				const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
+				// Send error response
+				await registry.publishResponse(callContext.responseChannel, {
+					success: false,
+					error: error.message,
+					callId: callContext.callId,
+					timestamp: Date.now(),
+				})
 
-				console.log("🔴 ReturnFromFunction: Rejecting return promise due to code execution error")
+				// Acknowledge the message even on error
+				await registry.acknowledgeCall(callContext.streamKey, callContext.groupName, callContext.messageId)
 
-				// Reject the promise with the error
-				try {
-					registry.rejectReturn(effectiveExecutionId, error)
-					console.log("🔴 ReturnFromFunction: ❌ Return promise rejected with error")
-				} catch (rejectError) {
-					console.error("🔴 ReturnFromFunction: ❌ Error rejecting return promise:", rejectError)
-				}
+				// Call context is embedded in the item, no need to clear static data
 
-				// Also create an error value for compatibility
-				parsedReturnValue = {
-					_error: "Return code execution failed",
-					_errorMessage: error.message,
-					_errorCode: returnCode,
-				}
-
-				// Continue with normal flow to clean up the stack
+				throw new NodeOperationError(this.getNode(), `Return code execution failed: ${error.message}`)
 			}
 
 			// Clean up the return value by removing internal fields
 			if (parsedReturnValue && typeof parsedReturnValue === "object") {
 				const cleanedReturnValue = { ...parsedReturnValue }
-				delete cleanedReturnValue._functionCallId
-				delete cleanedReturnValue._functionExecutionId
+				delete cleanedReturnValue._functionCall
 				parsedReturnValue = cleanedReturnValue
 			}
 
-			console.log("🔴 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
-
-			// Get execution ID from the registry (set by the Function node)
-			const registry = getFunctionRegistry()
-			console.log("🔴 ReturnFromFunction: Getting current function execution from registry...")
-
-			let functionExecutionId = registry.getCurrentFunctionExecution()
-			console.log("🔴 ReturnFromFunction: Function execution ID from registry:", functionExecutionId)
-			console.log("🔴 ReturnFromFunction: Raw execution ID from this context:", this.getExecutionId())
-
-			// Check if we have function call context info in the item
-			const functionCallId = item.json._functionCallId
-			const functionExecutionIdFromItem = item.json._functionExecutionId
-			console.log("🔴 ReturnFromFunction: Function call ID from item:", functionCallId)
-			console.log("🔴 ReturnFromFunction: Function execution ID from item:", functionExecutionIdFromItem)
-
-			// If we have function context from the item, use that (for cross-worker coordination)
-			if (functionExecutionIdFromItem && !functionExecutionId) {
-				functionExecutionId = String(functionExecutionIdFromItem)
-				console.log("🔴 ReturnFromFunction: Using function execution ID from item for cross-worker coordination:", functionExecutionId)
-			}
-
-			if (!functionExecutionId) {
-				console.warn("🔴 ReturnFromFunction: ⚠️  NO CURRENT FUNCTION EXECUTION FOUND!")
-				console.warn("🔴 ReturnFromFunction: ⚠️  This suggests the ReturnFromFunction is not properly connected to a Function node")
-				console.warn("🔴 ReturnFromFunction: ⚠️  Or the Function node didn't push its execution ID to the stack")
-			}
-
-			const effectiveExecutionId = String(functionExecutionId || this.getExecutionId() || "__active__")
-			console.log("🔴 ReturnFromFunction: Effective execution ID for storing return value:", effectiveExecutionId)
-			console.log("🔴 ReturnFromFunction: About to resolve return promise with value:", parsedReturnValue)
-
-			// Resolve the return promise (this will also store the value for compatibility)
-			console.log("🔴 ReturnFromFunction: Resolving return promise...")
+			console.log("🌊 ReturnFromFunction: Final return value (cleaned) =", parsedReturnValue)
 
 			try {
-				await registry.resolveReturn(effectiveExecutionId, parsedReturnValue)
-				console.log("🔴 ReturnFromFunction: ✅ Return promise resolved successfully!")
+				// Publish successful response
+				await registry.publishResponse(callContext.responseChannel, {
+					success: true,
+					data: parsedReturnValue,
+					callId: callContext.callId,
+					timestamp: Date.now(),
+				})
 
-				// Verify the value was actually stored
-				const verifyValue = await registry.getFunctionReturnValue(effectiveExecutionId)
-				console.log("🔴 ReturnFromFunction: Verification - stored value retrieval:", verifyValue)
+				console.log("🌊 ReturnFromFunction: ✅ Response published successfully!")
+
+				// Acknowledge the stream message
+				await registry.acknowledgeCall(callContext.streamKey, callContext.groupName, callContext.messageId)
+
+				console.log("🌊 ReturnFromFunction: ✅ Stream message acknowledged!")
 			} catch (error) {
-				console.error("🔴 ReturnFromFunction: ❌ Error resolving return promise:", error)
-				// Fall back to direct storage if promise resolution fails
-				await registry.setFunctionReturnValue(effectiveExecutionId, parsedReturnValue)
-				console.log("🔴 ReturnFromFunction: 🟡 Fell back to direct value storage")
+				console.error("🌊 ReturnFromFunction: ❌ Error publishing response:", error)
+				throw new NodeOperationError(this.getNode(), `Failed to publish response: ${error.message}`)
 			}
 
-			// Pop the current function execution from the stack now that we've stored the return value
-			if (functionExecutionId) {
-				console.log("🔴 ReturnFromFunction: Popping function execution from stack...")
-				const poppedId = registry.popCurrentFunctionExecution()
-				console.log("🔴 ReturnFromFunction: ✅ Popped function execution from stack:", poppedId)
-			} else {
-				console.log("🔴 ReturnFromFunction: ⚠️  No function execution ID to pop from stack")
-			}
+			// Call context is embedded in the item, no need to clear static data
+
+			console.log("🌊 ReturnFromFunction: ✅ Call context cleared")
 
 			// Clean up the result item by removing internal fields
 			const cleanedJson = { ...item.json }
-			delete cleanedJson._functionCallId
-			delete cleanedJson._functionExecutionId
+			delete cleanedJson._functionCall
 
 			const resultItem: INodeExecutionData = {
 				json: cleanedJson,
@@ -192,9 +179,9 @@ export class ReturnFromFunction implements INodeType {
 			returnData.push(resultItem)
 		}
 
-		console.log("🔴 ReturnFromFunction: ===== EXECUTION COMPLETE =====")
-		console.log("🔴 ReturnFromFunction: Final return data:", returnData)
-		console.log("🔴 ReturnFromFunction: Node execution completed at:", new Date().toISOString())
+		console.log("🌊 ReturnFromFunction: ===== EXECUTION COMPLETE =====")
+		console.log("🌊 ReturnFromFunction: Final return data:", returnData)
+		console.log("🌊 ReturnFromFunction: Node execution completed at:", new Date().toISOString())
 		return [returnData]
 	}
 }
