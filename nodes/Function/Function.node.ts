@@ -209,8 +209,8 @@ export class Function implements INodeType {
 				groupName = `group:${functionName}`
 				consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-				// Store function metadata in Redis
-				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [])
+				// Store function metadata in Redis (force Redis storage since we're using streams)
+				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [], true)
 
 				// Start heartbeat
 				registry.startHeartbeat(functionName, scope)
@@ -220,10 +220,17 @@ export class Function implements INodeType {
 				logger.error("Failed to set up Redis streams during activation:", error.message)
 				logger.info("Function will fall back to in-memory mode")
 				// Fall back to in-memory mode
-				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
-					logger.log("🌊 Function: In-memory fallback function called:", functionName, "with parameters:", parameters)
-					return [inputItem]
-				})
+				await registry.registerFunction(
+					functionName,
+					scope,
+					nodeId,
+					parameterDefinitions,
+					async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
+						logger.log("🌊 Function: In-memory fallback function called:", functionName, "with parameters:", parameters)
+						return [inputItem]
+					},
+					false
+				)
 
 				return {
 					closeFunction: async () => {
@@ -487,100 +494,105 @@ export class Function implements INodeType {
 			logger.debug("Queue mode disabled, using in-memory registration")
 
 			// Register function in memory only
-			await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
-				logger.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
+			await registry.registerFunction(
+				functionName,
+				scope,
+				nodeId,
+				parameterDefinitions,
+				async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
+					logger.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
 
-				// Process parameters according to function definition
-				const locals: Record<string, any> = {}
+					// Process parameters according to function definition
+					const locals: Record<string, any> = {}
 
-				for (const param of parameterList) {
-					const paramName = param.name
-					const paramType = param.type
-					const required = param.required
-					const defaultValue = param.defaultValue
+					for (const param of parameterList) {
+						const paramName = param.name
+						const paramType = param.type
+						const required = param.required
+						const defaultValue = param.defaultValue
 
-					let value = parameters[paramName]
+						let value = parameters[paramName]
 
-					// Handle required parameters
-					if (required && (value === undefined || value === null)) {
-						throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-					}
+						// Handle required parameters
+						if (required && (value === undefined || value === null)) {
+							throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+						}
 
-					// Use default value if not provided
-					if (value === undefined || value === null) {
-						if (defaultValue !== "") {
-							try {
-								// Try to parse default value based on type
-								switch (paramType) {
-									case "number":
-										value = Number(defaultValue)
-										break
-									case "boolean":
-										value = defaultValue.toLowerCase() === "true"
-										break
-									case "object":
-									case "array":
-										value = JSON.parse(defaultValue)
-										break
-									default:
-										value = defaultValue
+						// Use default value if not provided
+						if (value === undefined || value === null) {
+							if (defaultValue !== "") {
+								try {
+									// Try to parse default value based on type
+									switch (paramType) {
+										case "number":
+											value = Number(defaultValue)
+											break
+										case "boolean":
+											value = defaultValue.toLowerCase() === "true"
+											break
+										case "object":
+										case "array":
+											value = JSON.parse(defaultValue)
+											break
+										default:
+											value = defaultValue
+									}
+								} catch (error) {
+									value = defaultValue // Fall back to string if parsing fails
 								}
-							} catch (error) {
-								value = defaultValue // Fall back to string if parsing fails
 							}
 						}
+
+						locals[paramName] = value
 					}
 
-					locals[paramName] = value
-				}
+					// Generate a call ID for in-memory mode to track return values
+					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-				// Generate a call ID for in-memory mode to track return values
-				const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+					// Push current function execution context for ReturnFromFunction nodes
+					registry.pushCurrentFunctionExecution(callId)
 
-				// Push current function execution context for ReturnFromFunction nodes
-				registry.pushCurrentFunctionExecution(callId)
+					// Clear any existing return value for this execution
+					registry.clearFunctionReturnValue(callId)
 
-				// Clear any existing return value for this execution
-				registry.clearFunctionReturnValue(callId)
-
-				// Create the output item
-				let outputItem: INodeExecutionData = {
-					json: {
-						...inputItem.json,
-						...locals,
-						_functionCall: {
-							callId,
-							functionName,
-							timestamp: Date.now(),
-							// For in-memory mode, we don't need Redis-specific fields
-							responseChannel: null,
-							messageId: null,
-							streamKey: null,
-							groupName: null,
-						},
-					},
-					index: 0,
-					binary: inputItem.binary,
-				}
-
-				// Execute user code if enabled
-				if (enableCode && code.trim()) {
-					logger.log("🌊 Function: Executing JavaScript code in in-memory mode")
-
-					try {
-						// Execute JavaScript code with parameters as global variables
-						const context = {
+					// Create the output item
+					let outputItem: INodeExecutionData = {
+						json: {
+							...inputItem.json,
 							...locals,
-							item: outputItem.json,
-							console: {
-								log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
-								error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
-								warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
+							_functionCall: {
+								callId,
+								functionName,
+								timestamp: Date.now(),
+								// For in-memory mode, we don't need Redis-specific fields
+								responseChannel: null,
+								messageId: null,
+								streamKey: null,
+								groupName: null,
 							},
-						}
+						},
+						index: 0,
+						binary: inputItem.binary,
+					}
 
-						// Execute JavaScript code directly (n8n already provides sandboxing)
-						const wrappedCode = `
+					// Execute user code if enabled
+					if (enableCode && code.trim()) {
+						logger.log("🌊 Function: Executing JavaScript code in in-memory mode")
+
+						try {
+							// Execute JavaScript code with parameters as global variables
+							const context = {
+								...locals,
+								item: outputItem.json,
+								console: {
+									log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
+									error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
+									warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
+								},
+							}
+
+							// Execute JavaScript code directly (n8n already provides sandboxing)
+							const wrappedCode = `
 							(function() {
 								// Set up context variables
 								${Object.keys(context)
@@ -592,62 +604,64 @@ export class Function implements INodeType {
 							})
 						`
 
-						const result = eval(wrappedCode)(context)
+							const result = eval(wrappedCode)(context)
 
-						logger.log("🌊 Function: Code execution result =", result)
+							logger.log("🌊 Function: Code execution result =", result)
 
-						// If code returns a value, merge it with locals
-						if (result !== undefined) {
-							if (typeof result === "object" && result !== null) {
-								// Merge locals (parameters) first, then returned object (returned object wins conflicts)
-								outputItem.json = {
-									...outputItem.json,
-									...result,
-								}
-							} else {
-								// For non-object returns, include the result
-								outputItem.json = {
-									...outputItem.json,
-									result,
+							// If code returns a value, merge it with locals
+							if (result !== undefined) {
+								if (typeof result === "object" && result !== null) {
+									// Merge locals (parameters) first, then returned object (returned object wins conflicts)
+									outputItem.json = {
+										...outputItem.json,
+										...result,
+									}
+								} else {
+									// For non-object returns, include the result
+									outputItem.json = {
+										...outputItem.json,
+										result,
+									}
 								}
 							}
-						}
-					} catch (error) {
-						logger.error("🌊 Function: Code execution error:", error)
-						outputItem.json = {
-							...outputItem.json,
-							_codeError: error.message,
+						} catch (error) {
+							logger.error("🌊 Function: Code execution error:", error)
+							outputItem.json = {
+								...outputItem.json,
+								_codeError: error.message,
+							}
 						}
 					}
-				}
 
-				logger.log("🌊 Function: Emitting output item to downstream nodes")
-				this.emit([[outputItem]])
+					logger.log("🌊 Function: Emitting output item to downstream nodes")
+					this.emit([[outputItem]])
 
-				// Use promise-based return handling like the reference implementation
-				logger.log("🌊 Function: Setting up promise-based return handling...")
+					// Use promise-based return handling like the reference implementation
+					logger.log("🌊 Function: Setting up promise-based return handling...")
 
-				// Create a return promise for this execution
-				const returnPromise = registry.createReturnPromise(callId)
-				logger.log("🌊 Function: Return promise created")
+					// Create a return promise for this execution
+					const returnPromise = registry.createReturnPromise(callId)
+					logger.log("🌊 Function: Return promise created")
 
-				// Wait for return value from ReturnFromFunction node
-				let returnValue = null
+					// Wait for return value from ReturnFromFunction node
+					let returnValue = null
 
-				try {
-					returnValue = await returnPromise
-					logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
-				} catch (error) {
-					logger.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
-					registry.cleanupReturnPromise(callId)
-					// For errors, we'll still complete the function
-					returnValue = null
-				}
+					try {
+						returnValue = await returnPromise
+						logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
+					} catch (error) {
+						logger.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
+						registry.cleanupReturnPromise(callId)
+						// For errors, we'll still complete the function
+						returnValue = null
+					}
 
-				logger.log("🌊 Function: Function execution completed, final return value:", returnValue)
+					logger.log("🌊 Function: Function execution completed, final return value:", returnValue)
 
-				return [outputItem]
-			})
+					return [outputItem]
+				},
+				false
+			)
 
 			logger.info("Function registered successfully in in-memory mode")
 

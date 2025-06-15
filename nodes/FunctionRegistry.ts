@@ -522,7 +522,8 @@ class FunctionRegistry {
 		executionId: string,
 		nodeId: string,
 		parameters: ParameterDefinition[],
-		callback: (parameters: Record<string, any>, inputItem: INodeExecutionData) => Promise<INodeExecutionData[]>
+		callback: (parameters: Record<string, any>, inputItem: INodeExecutionData) => Promise<INodeExecutionData[]>,
+		forceRedisStorage: boolean = false
 	): Promise<void> {
 		const key = `${functionName}-${executionId}`
 		logger.info(`Registering function: ${key}`)
@@ -537,9 +538,9 @@ class FunctionRegistry {
 			callback,
 		})
 
-		// Store metadata in Redis for cross-process access (only in queue mode)
-		if (!isQueueModeEnabled()) {
-			logger.debug(`Queue mode disabled, skipping Redis metadata storage`)
+		// Store metadata in Redis for cross-process access (only in queue mode or when forced)
+		if (!isQueueModeEnabled() && !forceRedisStorage) {
+			logger.debug(`Queue mode disabled and Redis storage not forced, skipping Redis metadata storage`)
 			return
 		}
 

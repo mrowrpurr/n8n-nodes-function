@@ -8,7 +8,7 @@
 
 // Configuration - change these to control logging
 const LOG_INFO_ENABLED = true // Set to false to disable info logs
-const LOG_DEBUG_ENABLED = false // Set to true to enable debug logs
+const LOG_DEBUG_ENABLED = true // Set to true to enable debug logs
 
 export class Logger {
 	private prefix: string
