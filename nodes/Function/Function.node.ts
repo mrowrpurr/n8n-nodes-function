@@ -179,8 +179,10 @@ export class Function implements INodeType {
 
 			// Get the unique call ID from the call context stack
 			const currentCallContext = registry.getCurrentCallContext()
-			const currentExecutionId = currentCallContext || effectiveExecutionId
-			console.log("🎯 Function: Using execution ID:", currentExecutionId, "(call context:", currentCallContext, ")")
+			// Check if we're being called via pub/sub (there will be a function execution on the stack)
+			const currentFunctionExecution = registry.getCurrentFunctionExecution()
+			const currentExecutionId = currentFunctionExecution || currentCallContext || effectiveExecutionId
+			console.log("🎯 Function: Using execution ID:", currentExecutionId, "(call context:", currentCallContext, ", function execution:", currentFunctionExecution, ")")
 
 			// Push current function execution context for ReturnFromFunction nodes
 			registry.pushCurrentFunctionExecution(currentExecutionId)
