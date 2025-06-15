@@ -1,5 +1,5 @@
 import { type INodeExecutionData, NodeConnectionType, type INodeType, type INodeTypeDescription, type ITriggerFunctions, type ITriggerResponse } from "n8n-workflow"
-import { enableRedisMode, setRedisHost, setQueueMode } from "../FunctionRegistryFactory"
+import { enableRedisMode, setRedisHost, setQueueMode, setUseSimplifiedRegistry } from "../FunctionRegistryFactory"
 
 export class ConfigureFunctions implements INodeType {
 	description: INodeTypeDescription = {
@@ -74,6 +74,18 @@ export class ConfigureFunctions implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: "Use Simplified Registry",
+				name: "useSimplifiedRegistry",
+				type: "boolean",
+				default: false,
+				description: "Whether to use the simplified Redis registry (experimental - cleaner logic, same isolation)",
+				displayOptions: {
+					show: {
+						mode: ["redis"],
+					},
+				},
+			},
 		],
 	}
 
@@ -85,28 +97,39 @@ export class ConfigureFunctions implements INodeType {
 		const redisHost = this.getNodeParameter("redisHost", "redis") as string
 		const redisPort = this.getNodeParameter("redisPort", 6379) as number
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
+		const useSimplifiedRegistry = this.getNodeParameter("useSimplifiedRegistry", false) as boolean
 
 		console.log("⚙️ ConfigureFunctions: Mode =", mode)
 		console.log("⚙️ ConfigureFunctions: Redis host =", redisHost)
 		console.log("⚙️ ConfigureFunctions: Redis port =", redisPort)
 		console.log("⚙️ ConfigureFunctions: Test connection =", testConnection)
+		console.log("⚙️ ConfigureFunctions: Use simplified registry =", useSimplifiedRegistry)
 
 		// Configure the function registry based on mode
 		if (mode === "redis") {
 			console.log("⚙️ ConfigureFunctions: Enabling Redis mode")
-			enableRedisMode(redisHost)
+			enableRedisMode(redisHost, useSimplifiedRegistry)
+
+			// Also set the simplified registry flag directly
+			setUseSimplifiedRegistry(useSimplifiedRegistry)
 
 			// Test connection if requested
 			if (testConnection) {
 				console.log("⚙️ ConfigureFunctions: Testing Redis connection...")
 				try {
-					// Import and test Redis connection
-					const { FunctionRegistryRedis } = await import("../FunctionRegistryRedis")
-					const redisRegistry = FunctionRegistryRedis.getInstance()
-					redisRegistry.setRedisConfig(redisHost, redisPort)
-
-					// Try to connect (this will be done lazily when first used)
-					console.log("⚙️ ConfigureFunctions: Redis configuration set successfully")
+					if (useSimplifiedRegistry) {
+						// Import and test simplified Redis connection
+						const { FunctionRegistrySimplified } = await import("../FunctionRegistrySimplified")
+						const simplifiedRegistry = FunctionRegistrySimplified.getInstance()
+						simplifiedRegistry.setRedisConfig(redisHost, redisPort)
+						console.log("⚙️ ConfigureFunctions: Simplified Redis configuration set successfully")
+					} else {
+						// Import and test Redis connection
+						const { FunctionRegistryRedis } = await import("../FunctionRegistryRedis")
+						const redisRegistry = FunctionRegistryRedis.getInstance()
+						redisRegistry.setRedisConfig(redisHost, redisPort)
+						console.log("⚙️ ConfigureFunctions: Redis configuration set successfully")
+					}
 
 					// Emit a test configuration event
 					this.emit([
@@ -115,6 +138,7 @@ export class ConfigureFunctions implements INodeType {
 								mode: "redis",
 								redisHost,
 								redisPort,
+								useSimplifiedRegistry,
 								status: "configured",
 								timestamp: new Date().toISOString(),
 							},
@@ -130,6 +154,7 @@ export class ConfigureFunctions implements INodeType {
 								mode: "redis",
 								redisHost,
 								redisPort,
+								useSimplifiedRegistry,
 								status: "error",
 								error: error.message,
 								timestamp: new Date().toISOString(),
@@ -145,6 +170,7 @@ export class ConfigureFunctions implements INodeType {
 							mode: "redis",
 							redisHost,
 							redisPort,
+							useSimplifiedRegistry,
 							status: "configured",
 							timestamp: new Date().toISOString(),
 						},
