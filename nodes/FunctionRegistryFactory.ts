@@ -38,9 +38,10 @@ async function loadGlobalConfigAsync(): Promise<void> {
 	globalConfigLoaded = true // Mark as attempted to avoid multiple attempts
 
 	try {
-		// Try to connect to Redis with default host to read global config
+		// Try to connect to Redis with current host to read global config
+		const currentHost = redisHostOverride || "redis"
 		const client = createClient({
-			url: `redis://redis:6379`,
+			url: `redis://${currentHost}:6379`,
 			socket: {
 				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 				connectTimeout: 500, // 500ms timeout for config loading
@@ -110,6 +111,15 @@ export function enableRedisMode(host: string = "redis"): void {
 	logger.info("Enabling Redis mode with host:", host)
 	setRedisHost(host)
 	setQueueMode(true)
+
+	// Immediately update any existing registry instance
+	try {
+		const registry = FunctionRegistry.getInstance()
+		registry.setRedisConfig(host)
+		logger.info("Updated existing registry with new Redis host:", host)
+	} catch (error) {
+		logger.debug("No existing registry to update (this is normal):", error.message)
+	}
 }
 
 // Convenience function to disable Redis mode

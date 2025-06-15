@@ -93,8 +93,9 @@ export class ConfigureFunctions implements INodeType {
 			logger.debug("About to configure Redis with host:", redisConfig.host, "port:", redisConfig.port)
 
 			// Enable Redis mode using the factory
+			logger.info("🔧 About to enable Redis mode with host:", redisConfig.host)
 			enableRedisMode(redisConfig.host)
-			logger.info("✅ Redis mode enabled via FunctionRegistryFactory")
+			logger.info("✅ Redis mode enabled via FunctionRegistryFactory with host:", redisConfig.host)
 
 			// Store global config in Redis for workers to read
 			try {
@@ -188,8 +189,10 @@ export class ConfigureFunctions implements INodeType {
 			try {
 				// Since we're in memory mode, we need to temporarily connect to Redis to clear the config
 				const { createClient } = await import("redis")
+				const { getRedisHost } = await import("../FunctionRegistryFactory")
+				const currentHost = getRedisHost()
 				const client = createClient({
-					url: `redis://redis:6379`,
+					url: `redis://${currentHost}:6379`,
 					socket: {
 						reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 						connectTimeout: 1000,
