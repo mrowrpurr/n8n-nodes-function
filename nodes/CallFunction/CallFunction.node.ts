@@ -312,7 +312,6 @@ export class CallFunction implements INodeType {
 			},
 		},
 	}
-
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		console.log("🔧 CallFunction: Starting execution")
 		const items = this.getInputData()
@@ -320,6 +319,21 @@ export class CallFunction implements INodeType {
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+			const currentItem = items[itemIndex]
+
+			// Check for recursion prevention marker
+			const functionCall = currentItem.json._functionCall as any
+			if (functionCall && functionCall._isInternalFunctionCall) {
+				console.log("🔧 CallFunction: Skipping execution - internal function call detected (recursion prevention)")
+				// Pass through the item unchanged to prevent recursion
+				returnData.push({
+					json: { ...currentItem.json },
+					index: itemIndex,
+					binary: currentItem.binary,
+				})
+				continue
+			}
+
 			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
@@ -431,7 +445,7 @@ export class CallFunction implements INodeType {
 			console.log("🔧 CallFunction: Global function =", globalFunction)
 
 			// Use the registry instance to call the function
-			const item = items[itemIndex]
+			const item = currentItem
 
 			try {
 				// Try to call the function with target execution ID

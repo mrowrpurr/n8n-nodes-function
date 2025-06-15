@@ -274,28 +274,40 @@ class FunctionRegistryRedis {
 	}
 
 	async getAvailableFunctions(executionId?: string): Promise<Array<{ name: string; value: string }>> {
+		console.log("🎯 FunctionRegistryRedis: Getting available functions for execution:", executionId)
 		const functionNames = new Set<string>()
 
 		// Get functions from memory (local process)
 		for (const listener of this.listeners.values()) {
-			if (executionId && listener.executionId !== executionId) {
+			if (executionId && executionId !== "__active__" && listener.executionId !== executionId) {
 				continue
 			}
 			functionNames.add(listener.functionName)
+			console.log("🎯 FunctionRegistryRedis: Found function in memory:", listener.functionName, "execution:", listener.executionId)
 		}
 
 		// Get functions from Redis (other processes)
 		try {
 			await this.ensureRedisConnection()
 			if (this.client) {
-				const pattern = executionId ? `function:${executionId}:*` : `function:*`
+				let pattern: string
+				if (executionId && executionId !== "__active__") {
+					// For specific execution ID, search only that execution
+					pattern = `function:${executionId}:*`
+				} else {
+					// For __active__ or no execution ID, search all functions
+					pattern = `function:*`
+				}
+				console.log("🎯 FunctionRegistryRedis: Searching Redis with pattern:", pattern)
 				const keys = await this.client.keys(pattern)
+				console.log("🎯 FunctionRegistryRedis: Found Redis keys:", keys.length)
 
 				for (const key of keys) {
 					const parts = key.split(":")
 					if (parts.length >= 3) {
 						const functionName = parts.slice(2).join(":") // Handle function names with colons
 						functionNames.add(functionName)
+						console.log("🎯 FunctionRegistryRedis: Found function in Redis:", functionName, "from key:", key)
 					}
 				}
 			}
@@ -304,10 +316,12 @@ class FunctionRegistryRedis {
 		}
 
 		// Convert to array of options for n8n dropdown
-		return Array.from(functionNames).map((name) => ({
+		const result = Array.from(functionNames).map((name) => ({
 			name,
 			value: name,
 		}))
+		console.log("🎯 FunctionRegistryRedis: Returning available functions:", result)
+		return result
 	}
 
 	async getFunctionParameters(functionName: string, executionId?: string): Promise<ParameterDefinition[]> {

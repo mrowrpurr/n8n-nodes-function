@@ -178,15 +178,42 @@ class FunctionRegistryWorkflow {
 			await this.ensureRedisConnection()
 			if (!this.client) throw new Error("Redis client not available")
 
-			// Try to find function definition in Redis with simple lookup order:
-			// 1. Workflow-specific function
-			// 2. Global function
-			const workflowKey = `function:workflow:${workflowId}:${functionName}`
-			const globalKey = `function:global:${functionName}`
+			let definitionJson: string | null = null
+			let foundKey: string | null = null
 
-			let definitionJson = await this.client.get(workflowKey)
+			if (workflowId === "__active__") {
+				// For __active__, search across all workflows for this function
+				console.log("🔧 FunctionRegistryWorkflow: __active__ mode - searching all workflows for function:", functionName)
+				const allWorkflowKeys = await this.client.keys(`function:workflow:*:${functionName}`)
+				console.log("🔧 FunctionRegistryWorkflow: Found workflow function keys:", allWorkflowKeys)
+
+				// Try to get the function from any workflow
+				for (const key of allWorkflowKeys) {
+					definitionJson = await this.client.get(key)
+					if (definitionJson) {
+						foundKey = key
+						console.log("🔧 FunctionRegistryWorkflow: Found function definition in key:", key)
+						break
+					}
+				}
+			} else {
+				// For specific workflow ID, search only that workflow first
+				const workflowKey = `function:workflow:${workflowId}:${functionName}`
+				console.log("🔧 FunctionRegistryWorkflow: Specific workflow mode - checking key:", workflowKey)
+				definitionJson = await this.client.get(workflowKey)
+				if (definitionJson) {
+					foundKey = workflowKey
+				}
+			}
+
+			// If not found in workflows, try global
 			if (!definitionJson) {
+				const globalKey = `function:global:${functionName}`
+				console.log("🔧 FunctionRegistryWorkflow: Checking global key:", globalKey)
 				definitionJson = await this.client.get(globalKey)
+				if (definitionJson) {
+					foundKey = globalKey
+				}
 			}
 
 			if (!definitionJson) {
@@ -195,13 +222,13 @@ class FunctionRegistryWorkflow {
 			}
 
 			const functionDefinition: SerializedFunctionDefinition = JSON.parse(definitionJson)
-			console.log("🔧 FunctionRegistryWorkflow: Function definition loaded from Redis")
+			console.log("🔧 FunctionRegistryWorkflow: Function definition loaded from Redis key:", foundKey)
 
-			// Use n8n's executeWorkflow API to actually execute the workflow containing the Function node
+			// Use n8n's executeWorkflow API but with recursion protection
 			if (executeFunctions && typeof executeFunctions.executeWorkflow === "function") {
 				console.log("🔧 FunctionRegistryWorkflow: Executing workflow via n8n's executeWorkflow API")
 
-				// Prepare input data with function parameters
+				// Prepare input data with function parameters and recursion marker
 				const workflowInputData = [
 					{
 						json: {
@@ -211,6 +238,8 @@ class FunctionRegistryWorkflow {
 								functionName,
 								callId,
 								parameters,
+								// Add marker to prevent recursion
+								_isInternalFunctionCall: true,
 							},
 						},
 						binary: inputItem.binary,
@@ -221,6 +250,7 @@ class FunctionRegistryWorkflow {
 					id: functionDefinition.workflowId,
 				}
 
+				console.log("🔧 FunctionRegistryWorkflow: Executing workflow with ID:", functionDefinition.workflowId)
 				const executionResult = await executeFunctions.executeWorkflow(workflowInfo, workflowInputData)
 
 				console.log("🔧 FunctionRegistryWorkflow: Workflow execution completed:", executionResult)
@@ -389,21 +419,34 @@ class FunctionRegistryWorkflow {
 	 * Get available functions with simple lookup
 	 */
 	async getAvailableFunctions(workflowId: string): Promise<Array<{ name: string; value: string }>> {
+		console.log("🎯 FunctionRegistryWorkflow: Getting available functions for workflow:", workflowId)
 		const functionNames = new Set<string>()
 
 		try {
 			await this.ensureRedisConnection()
 			if (this.client) {
-				// Get workflow-specific functions
-				const workflowKeys = await this.client.keys(`function:workflow:${workflowId}:*`)
-				// Get global functions
+				let workflowKeys: string[] = []
+
+				if (workflowId === "__active__") {
+					// For __active__, search ALL workflow functions since functions are registered with actual workflow IDs
+					console.log("🎯 FunctionRegistryWorkflow: __active__ mode - searching all workflows")
+					workflowKeys = await this.client.keys(`function:workflow:*`)
+				} else {
+					// For specific workflow ID, search only that workflow
+					console.log("🎯 FunctionRegistryWorkflow: Specific workflow mode - searching workflow:", workflowId)
+					workflowKeys = await this.client.keys(`function:workflow:${workflowId}:*`)
+				}
+
+				// Always include global functions
 				const globalKeys = await this.client.keys(`function:global:*`)
+				console.log("🎯 FunctionRegistryWorkflow: Found workflow keys:", workflowKeys.length, "global keys:", globalKeys.length)
 
 				for (const key of [...workflowKeys, ...globalKeys]) {
 					const parts = key.split(":")
 					if (parts.length >= 3) {
 						const functionName = parts[parts.length - 1] // Last part is function name
 						functionNames.add(functionName)
+						console.log("🎯 FunctionRegistryWorkflow: Found function:", functionName, "from key:", key)
 					}
 				}
 			}
@@ -411,29 +454,56 @@ class FunctionRegistryWorkflow {
 			console.error("🎯 FunctionRegistryWorkflow: Error getting functions from Redis:", error)
 		}
 
-		return Array.from(functionNames).map((name) => ({
+		const result = Array.from(functionNames).map((name) => ({
 			name,
 			value: name,
 		}))
+		console.log("🎯 FunctionRegistryWorkflow: Returning available functions:", result)
+		return result
 	}
 
 	/**
 	 * Get function parameters with simple lookup
 	 */
 	async getFunctionParameters(functionName: string, workflowId: string): Promise<ParameterDefinition[]> {
+		console.log("🎯 FunctionRegistryWorkflow: Getting parameters for function:", functionName, "workflow:", workflowId)
+
 		try {
 			await this.ensureRedisConnection()
 			if (this.client) {
-				const workflowKey = `function:workflow:${workflowId}:${functionName}`
-				const globalKey = `function:global:${functionName}`
+				let definitionJson: string | null = null
 
-				let definitionJson = await this.client.get(workflowKey)
+				if (workflowId === "__active__") {
+					// For __active__, search across all workflows for this function
+					console.log("🎯 FunctionRegistryWorkflow: __active__ mode - searching all workflows for function:", functionName)
+					const allWorkflowKeys = await this.client.keys(`function:workflow:*:${functionName}`)
+					console.log("🎯 FunctionRegistryWorkflow: Found workflow function keys:", allWorkflowKeys)
+
+					// Try to get the function from any workflow
+					for (const key of allWorkflowKeys) {
+						definitionJson = await this.client.get(key)
+						if (definitionJson) {
+							console.log("🎯 FunctionRegistryWorkflow: Found function definition in key:", key)
+							break
+						}
+					}
+				} else {
+					// For specific workflow ID, search only that workflow
+					const workflowKey = `function:workflow:${workflowId}:${functionName}`
+					console.log("🎯 FunctionRegistryWorkflow: Specific workflow mode - checking key:", workflowKey)
+					definitionJson = await this.client.get(workflowKey)
+				}
+
+				// If not found in workflows, try global
 				if (!definitionJson) {
+					const globalKey = `function:global:${functionName}`
+					console.log("🎯 FunctionRegistryWorkflow: Checking global key:", globalKey)
 					definitionJson = await this.client.get(globalKey)
 				}
 
 				if (definitionJson) {
 					const definition: SerializedFunctionDefinition = JSON.parse(definitionJson)
+					console.log("🎯 FunctionRegistryWorkflow: Found function parameters:", definition.parameters)
 					return definition.parameters || []
 				}
 			}
@@ -441,6 +511,7 @@ class FunctionRegistryWorkflow {
 			console.error("🎯 FunctionRegistryWorkflow: Error getting function parameters from Redis:", error)
 		}
 
+		console.log("🎯 FunctionRegistryWorkflow: No parameters found for function:", functionName)
 		return []
 	}
 
