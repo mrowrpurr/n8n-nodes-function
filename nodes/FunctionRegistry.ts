@@ -54,6 +54,25 @@ class FunctionRegistry {
 		return FunctionRegistry.instance
 	}
 
+	/**
+	 * Set Redis configuration (public method for ConfigureFunctions node)
+	 */
+	setRedisConfig(host: string, port: number = 6379): void {
+		console.log(`🔴 FunctionRegistry[${WORKER_ID}]: Setting Redis config - host: ${host}, port: ${port}`)
+		this.redisHost = host
+		this.redisPort = port
+		// Reset connection state to force reconnection with new config
+		this.isConnected = false
+		this.isSubscriberSetup = false
+	}
+
+	/**
+	 * Test Redis connection (public method for ConfigureFunctions node)
+	 */
+	async testRedisConnection(): Promise<void> {
+		await this.ensureRedisConnection()
+	}
+
 	private async ensureRedisConnection(): Promise<void> {
 		if (this.client && this.isConnected) {
 			return

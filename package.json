@@ -32,11 +32,14 @@
 	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
-		"credentials": [],
+		"credentials": [
+			"dist/credentials/FunctionsRedisCredentials.credentials.js"
+		],
 		"nodes": [
 			"dist/nodes/Function/Function.node.js",
 			"dist/nodes/CallFunction/CallFunction.node.js",
-			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js"
+			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js",
+			"dist/nodes/ConfigureFunctions/ConfigureFunctions.node.js"
 		]
 	},
 	"devDependencies": {
