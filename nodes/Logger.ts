@@ -7,7 +7,7 @@
  */
 
 // Configuration - change these to control logging
-const LOG_INFO_ENABLED = false // Set to false to disable info logs
+const LOG_INFO_ENABLED = true // Set to false to disable info logs
 const LOG_DEBUG_ENABLED = false // Set to true to enable debug logs
 
 export class Logger {
@@ -49,6 +49,14 @@ export class Logger {
 	 */
 	warn(...args: any[]): void {
 		console.warn(`${this.prefix}:`, ...args)
+	}
+
+	/**
+	 * General log method (maps to info level)
+	 * This provides compatibility with existing logger.log() calls
+	 */
+	log(...args: any[]): void {
+		this.info(...args)
 	}
 }
 

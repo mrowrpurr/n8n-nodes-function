@@ -359,8 +359,6 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const nodeId = this.getNode().id
-		const nodeName = this.getNode().name
 		logger.log(`Starting execution`)
 		const items = this.getInputData()
 		logger.log(`Input items count =`, items.length)
@@ -376,9 +374,6 @@ export class CallFunction implements INodeType {
 		const returnData: INodeExecutionData[] = []
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			// Debug: Log node information
-			const nodeId = this.getNode().id
-			const nodeName = this.getNode().name
 			logger.log(`Processing item ${itemIndex + 1}/${items.length}`)
 
 			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
