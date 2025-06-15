@@ -36,6 +36,9 @@ class FunctionRegistrySimplified {
 	private redisPort: number = 6379
 	private isConnected: boolean = false
 
+	// Pub/sub: keep track of subscriber clients for each function
+	private functionSubscribers: Map<string, RedisClientType> = new Map()
+
 	static getInstance(): FunctionRegistrySimplified {
 		if (!FunctionRegistrySimplified.instance) {
 			FunctionRegistrySimplified.instance = new FunctionRegistrySimplified()
@@ -118,6 +121,33 @@ class FunctionRegistrySimplified {
 			console.log("🎯 FunctionRegistrySimplified: Function metadata stored in Redis:", redisKey)
 		} catch (error) {
 			console.error("🎯 FunctionRegistrySimplified: Failed to store function metadata in Redis:", error)
+			// Pub/sub: subscribe to function call channel for this function
+			const callChannel = `function:call:${functionName}`
+			if (!this.functionSubscribers.has(functionName)) {
+				const subscriber = createClient({ url: `redis://${this.redisHost}:${this.redisPort}` })
+				subscriber.connect().then(() => {
+					console.log(`🔔 [PubSub] Subscribed to function call channel: ${callChannel}`)
+					subscriber.subscribe(callChannel, async (message) => {
+						try {
+							console.log(`🔔 [PubSub] Received function call request on ${callChannel}:`, message)
+							const req = JSON.parse(message)
+							const { callId, parameters, inputItem, responseChannel } = req
+							const listener = this.listeners.get(functionName)
+							if (!listener) {
+								console.warn(`🔔 [PubSub] No local callback for function ${functionName}, cannot execute`)
+								return
+							}
+							const result = await listener.callback(parameters, inputItem)
+							const response = { callId, result }
+							await subscriber.publish(responseChannel, JSON.stringify(response))
+							console.log(`🔔 [PubSub] Published function result to ${responseChannel}:`, response)
+						} catch (err) {
+							console.error(`🔔 [PubSub] Error handling function call request:`, err)
+						}
+					})
+				})
+				this.functionSubscribers.set(functionName, subscriber as any)
+			}
 		}
 	}
 
@@ -183,8 +213,52 @@ class FunctionRegistrySimplified {
 
 				if (metadataJson) {
 					console.log("🔧 FunctionRegistrySimplified: Function metadata found in Redis but no local callback")
-					console.log("🔧 FunctionRegistrySimplified: This suggests the function is registered in a different process")
-					return { result: null, callId }
+					console.log("🔧 FunctionRegistrySimplified: Attempting cross-process call via pub/sub")
+					// Pub/sub: send request to function call channel and wait for response
+					const callChannel = `function:call:${functionName}`
+					const responseChannel = `function:response:${callId}`
+					const pubClient = createClient({ url: `redis://${this.redisHost}:${this.redisPort}` })
+					const subClient = createClient({ url: `redis://${this.redisHost}:${this.redisPort}` })
+					await pubClient.connect()
+					await subClient.connect()
+					let resolved = false
+					const timeoutMs = 10000
+					return new Promise(async (resolve) => {
+						const timeout = setTimeout(async () => {
+							if (!resolved) {
+								resolved = true
+								console.error(`🔧 FunctionRegistrySimplified: Pub/sub call timed out for ${functionName} (callId: ${callId})`)
+								await pubClient.disconnect()
+								await subClient.disconnect()
+								resolve({ result: null, callId })
+							}
+						}, timeoutMs)
+						await subClient.subscribe(responseChannel, async (message) => {
+							if (resolved) return
+							resolved = true
+							clearTimeout(timeout)
+							try {
+								const response = JSON.parse(message)
+								console.log(`🔧 FunctionRegistrySimplified: Received pub/sub function response for ${functionName} (callId: ${callId}):`, response)
+								await pubClient.disconnect()
+								await subClient.disconnect()
+								resolve({ result: response.result, callId })
+							} catch (err) {
+								console.error(`🔧 FunctionRegistrySimplified: Error parsing pub/sub response:`, err)
+								await pubClient.disconnect()
+								await subClient.disconnect()
+								resolve({ result: null, callId })
+							}
+						})
+						const request = {
+							callId,
+							parameters,
+							inputItem,
+							responseChannel,
+						}
+						console.log(`🔧 FunctionRegistrySimplified: Publishing function call request to ${callChannel}:`, request)
+						await pubClient.publish(callChannel, JSON.stringify(request))
+					})
 				}
 			} catch (error) {
 				console.error("🔧 FunctionRegistrySimplified: Error checking Redis for function:", error)
