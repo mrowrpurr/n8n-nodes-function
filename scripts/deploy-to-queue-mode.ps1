@@ -1,1 +1,0 @@
-docker compose -p n8n-docker-compose exec n8n sh -c "mkdir -p ~/.n8n/custom && cd ~/.n8n/custom/ && npm install /mnt/code/mrowrpurr/n8n-nodes-function/" && docker compose -p n8n-docker-compose stop && docker compose -p n8n-docker-compose -f "D:\Code\MrowrMisc\n8n-docker-compose\docker-compose.yml" up -d
