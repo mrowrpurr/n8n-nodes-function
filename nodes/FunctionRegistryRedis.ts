@@ -32,8 +32,8 @@ class FunctionRegistryRedis {
 	private nextCallId: number = 1
 	private callContextStack: string[] = []
 	private returnPromises: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map()
-	private redisHost: string = "redis"
-	private redisPort: number = 6379
+	private redisHost: string | null = null
+	private redisPort: number | null = null
 	private isConnected: boolean = false
 
 	static getInstance(): FunctionRegistryRedis {

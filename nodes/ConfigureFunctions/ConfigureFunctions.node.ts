@@ -56,29 +56,8 @@ export class ConfigureFunctions implements INodeType {
 		resetGlobalConfig()
 		logger.debug("Global configuration state reset")
 
-		// Clear any existing global config from Redis to prevent stale config
-		// Use default connection parameters to avoid chicken-and-egg problem
-		try {
-			const { createClient } = await import("redis")
-			const client = createClient({
-				socket: {
-					host: "redis",
-					port: 6379,
-					tls: false,
-					reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-					connectTimeout: 1000,
-					commandTimeout: 1000,
-				},
-				database: 0,
-			})
-
-			await client.connect()
-			await client.del("function:global_config")
-			await client.disconnect()
-			logger.debug("✅ Cleared existing global config from Redis using default connection")
-		} catch (error) {
-			logger.debug("Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
-		}
+		// Skip clearing global config if no Redis credentials are available
+		// This avoids hardcoded defaults
 
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean
@@ -92,20 +71,15 @@ export class ConfigureFunctions implements INodeType {
 		if (useRedis) {
 			logger.info("Enabling Redis mode")
 
-			// Get Redis credentials if provided
-			let redisConfig = {
-				host: "redis",
-				port: 6379,
-				database: 0,
-				user: "",
-				password: "",
-				ssl: false,
-			}
-
+			// Get Redis credentials - required for Redis mode
+			let redisConfig: any
 			try {
 				const credentials = (await this.getCredentials(FUNCTIONS_REDIS_INFO.credentialsName)) as unknown as FunctionsRedisCredentialsData
+				if (!credentials.host) {
+					throw new NodeOperationError(this.getNode(), "Redis host is required in credentials")
+				}
 				redisConfig = {
-					host: credentials.host || "redis",
+					host: credentials.host,
 					port: credentials.port || 6379,
 					database: credentials.database || 0,
 					user: credentials.user || "",
@@ -114,7 +88,7 @@ export class ConfigureFunctions implements INodeType {
 				}
 				logger.debug("Using Redis credentials - host:", redisConfig.host, "port:", redisConfig.port)
 			} catch (error) {
-				logger.warn("No Redis credentials provided, using defaults:", error.message)
+				throw new NodeOperationError(this.getNode(), `Redis credentials are required when Redis mode is enabled. ${error.message}`)
 			}
 
 			logger.debug("🚀 CONFIGURING GLOBAL REDIS SETTINGS")
@@ -220,33 +194,8 @@ export class ConfigureFunctions implements INodeType {
 			disableRedisMode()
 			logger.info("✅ Redis mode disabled via FunctionRegistryFactory")
 
-			// Try to clear global config from Redis if it exists
-			try {
-				// Since we're in memory mode, we need to temporarily connect to Redis to clear the config
-				const { createClient } = await import("redis")
-				const { getRedisConfig } = await import("../FunctionRegistryFactory")
-				const currentConfig = getRedisConfig()
-				const client = createClient({
-					socket: {
-						host: currentConfig.host,
-						port: currentConfig.port,
-						tls: currentConfig.ssl === true,
-						reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
-						connectTimeout: 1000,
-						commandTimeout: 1000,
-					},
-					database: currentConfig.database,
-					username: currentConfig.user || undefined,
-					password: currentConfig.password || undefined,
-				})
-
-				await client.connect()
-				await client.del("function:global_config")
-				await client.disconnect()
-				logger.debug("✅ Global config cleared from Redis")
-			} catch (error) {
-				logger.debug("Could not clear global config from Redis (this is normal if Redis is not available):", error.message)
-			}
+			// Skip clearing global config when switching to in-memory mode
+			// No hardcoded Redis defaults
 
 			// Emit configuration event
 			this.emit([

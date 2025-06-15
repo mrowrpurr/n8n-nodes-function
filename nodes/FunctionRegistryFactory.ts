@@ -52,20 +52,17 @@ export function setQueueMode(enabled: boolean): void {
 }
 
 export function getRedisHost(): string {
-	return redisConfigOverride?.host || "redis"
+	if (!redisConfigOverride?.host) {
+		throw new Error("Redis host not configured. Please configure Redis credentials.")
+	}
+	return redisConfigOverride.host
 }
 
 export function getRedisConfig(): RedisConfig {
-	return (
-		redisConfigOverride || {
-			host: "redis",
-			port: 6379,
-			database: 0,
-			user: "",
-			password: "",
-			ssl: false,
-		}
-	)
+	if (!redisConfigOverride) {
+		throw new Error("Redis configuration not set. Please configure Redis credentials.")
+	}
+	return redisConfigOverride
 }
 
 export function isQueueModeEnabled(): boolean {
@@ -85,21 +82,27 @@ async function loadGlobalConfigAsync(): Promise<void> {
 		return
 	}
 	logger.debug("Loading global configuration from Redis...")
-	globalConfigLoaded = true // Mark as attempted to avoid multiple attempts
 
 	try {
-		// Try to connect to Redis with default config to read global config
-		// Don't use cached config here as it might be stale
+		// Skip loading if no Redis config is available
+		if (!redisConfigOverride) {
+			logger.debug("No Redis config available, skipping global config load")
+			return
+		}
+
+		// Try to connect to Redis with configured settings
 		const client = createClient({
 			socket: {
-				host: "redis",
-				port: 6379,
-				tls: false,
+				host: redisConfigOverride.host,
+				port: redisConfigOverride.port,
+				tls: redisConfigOverride.ssl,
 				reconnectStrategy: (retries: number) => Math.min(retries * 50, 500),
 				connectTimeout: 500, // 500ms timeout for config loading
 				commandTimeout: 500,
 			},
-			database: 0,
+			database: redisConfigOverride.database,
+			username: redisConfigOverride.user || undefined,
+			password: redisConfigOverride.password || undefined,
 		})
 
 		await client.connect()
@@ -141,8 +144,14 @@ async function loadGlobalConfigAsync(): Promise<void> {
 		}
 
 		await client.disconnect()
+
+		// Only mark as loaded after successful Redis connection and config retrieval
+		globalConfigLoaded = true
 	} catch (error) {
-		logger.debug("Could not load global config from Redis (using defaults):", error.message)
+		logger.debug("Could not load global config from Redis (will retry on next access):", error.message)
+		// Don't set globalConfigLoaded = true here, so it will retry next time
+		// Also clear the promise cache so next attempt creates a new promise
+		configLoadingPromise = null
 	}
 }
 
@@ -186,7 +195,10 @@ export async function loadGlobalConfig(): Promise<void> {
 	}
 }
 // Convenience function to enable Redis mode and set host in one call
-export function enableRedisMode(host: string = "redis"): void {
+export function enableRedisMode(host?: string): void {
+	if (!host) {
+		throw new Error("Redis host is required to enable Redis mode")
+	}
 	logger.info("Enabling Redis mode with host:", host)
 	setRedisHost(host)
 	setQueueMode(true)

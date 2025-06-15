@@ -41,14 +41,7 @@ class FunctionRegistry {
 	private callContextStack: string[] = []
 	private returnPromises: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map()
 	private inMemoryReturnValues: Map<string, any> = new Map()
-	private redisConfig: RedisConfig = {
-		host: "redis",
-		port: 6379,
-		database: 0,
-		user: "",
-		password: "",
-		ssl: false,
-	}
+	private redisConfig: RedisConfig | null = null
 	private isConnected: boolean = false
 	private isSubscriberSetup: boolean = false
 
@@ -85,6 +78,9 @@ class FunctionRegistry {
 	 * Build Redis client configuration from stored config
 	 */
 	private buildRedisClientConfig() {
+		if (!this.redisConfig) {
+			throw new Error("Redis configuration not set. Please configure Redis credentials.")
+		}
 		return {
 			socket: {
 				host: this.redisConfig.host,
@@ -112,6 +108,10 @@ class FunctionRegistry {
 		}
 
 		try {
+			if (!this.redisConfig) {
+				throw new Error("Redis configuration not set. Please configure Redis credentials.")
+			}
+
 			logger.log(`Connecting to Redis at ${this.redisConfig.host}:${this.redisConfig.port} (database: ${this.redisConfig.database}, ssl: ${this.redisConfig.ssl})`)
 
 			const clientConfig = this.buildRedisClientConfig()

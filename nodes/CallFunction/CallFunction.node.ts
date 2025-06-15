@@ -213,22 +213,12 @@ export class CallFunction implements INodeType {
 						logger.log("🔧 CallFunction: Workflow ID unknown, getting all functions and filtering")
 						const allFunctions = await registry.getAvailableFunctions()
 
-						// Filter to only show non-global functions by checking if they have global scope parameters
-						const localFunctions = []
-						for (const func of allFunctions) {
-							try {
-								const globalParams = await registry.getFunctionParameters(func.value, "__global__")
-								// If function has parameters in global scope, it's global; otherwise it's local
-								if (globalParams.length === 0) {
-									localFunctions.push(func)
-								}
-							} catch (error) {
-								// If there's an error getting global params, assume it's local
-								localFunctions.push(func)
-							}
-						}
+						// Get actual global functions to filter them out
+						const globalFunctions = await registry.getAvailableFunctions("__global__")
+						const globalNames = new Set(globalFunctions.map((f) => f.value))
 
-						availableFunctions = localFunctions
+						// Filter to only show non-global functions
+						availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
 						logger.log("🔧 CallFunction: Found local functions after filtering:", availableFunctions)
 					}
 
@@ -620,13 +610,15 @@ export class CallFunction implements INodeType {
 					// Start with the original item
 					let resultJson: any = { ...item.json }
 
-					// Add Redis host metadata if it's not the default "redis"
-					const currentRedisHost = getRedisHost()
-					if (currentRedisHost !== "redis") {
+					// Add Redis host metadata if available
+					try {
+						const currentRedisHost = getRedisHost()
 						if (!resultJson._function_call_metadata) {
 							resultJson._function_call_metadata = {}
 						}
 						resultJson._function_call_metadata.redis_host = currentRedisHost
+					} catch (error) {
+						// Redis host not configured, skip metadata
 					}
 
 					// Always include the function result, but how it's stored depends on storeResponse setting

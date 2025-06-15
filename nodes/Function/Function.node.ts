@@ -166,10 +166,8 @@ export class Function implements INodeType {
 		logger.debug("Workflow ID:", workflowId)
 		logger.debug("Parameter list:", parameterList)
 
-		// Don't use any cached Redis config - let ConfigureFunctions set it first
-		const { resetGlobalConfig } = await import("../FunctionRegistryFactory")
-		resetGlobalConfig()
-
+		// Get the registry without resetting global config
+		// ConfigureFunctions is responsible for setting the Redis configuration
 		const registry = await getFunctionRegistry()
 
 		// Convert parameter list to ParameterDefinition format
