@@ -11,7 +11,7 @@ export class ConfigureFunctions implements INodeType {
 		version: 1,
 		description: "Configure function system settings (Redis host, queue mode)",
 		eventTriggerDescription: "Runs when workflow is activated to configure function settings",
-		subtitle: "={{$parameter['mode'] === 'redis' ? 'Redis Mode: ' + $parameter['redisHost'] : 'In-Memory Mode'}}",
+		subtitle: "={{$parameter['useRedis'] ? 'Redis Mode Enabled' : 'In-Memory Mode'}}",
 		defaults: {
 			name: "Configure Functions",
 			color: "#9b59b6",
@@ -60,16 +60,18 @@ export class ConfigureFunctions implements INodeType {
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		console.log("⚙️ ConfigureFunctions: Starting configuration")
+		console.log("⚙️ ConfigureFunctions: ===== STARTING GLOBAL CONFIGURATION =====")
+		console.log("⚙️ ConfigureFunctions: Node execution started")
 
 		// Get configuration parameters
 		const useRedis = this.getNodeParameter("useRedis") as boolean
 		const testConnection = this.getNodeParameter("testConnection", false) as boolean
 		const useSimplifiedRegistry = this.getNodeParameter("useSimplifiedRegistry", false) as boolean
 
-		console.log("⚙️ ConfigureFunctions: Use Redis =", useRedis)
-		console.log("⚙️ ConfigureFunctions: Test connection =", testConnection)
-		console.log("⚙️ ConfigureFunctions: Use simplified registry =", useSimplifiedRegistry)
+		console.log("⚙️ ConfigureFunctions: Parameters retrieved:")
+		console.log("⚙️ ConfigureFunctions: - Use Redis =", useRedis)
+		console.log("⚙️ ConfigureFunctions: - Test connection =", testConnection)
+		console.log("⚙️ ConfigureFunctions: - Use simplified registry =", useSimplifiedRegistry)
 
 		// For now, just use the user setting - we can add auto-detection later
 		const shouldUseRedis = useRedis
@@ -106,10 +108,17 @@ export class ConfigureFunctions implements INodeType {
 				}
 			}
 
+			console.log("⚙️ ConfigureFunctions: 🚀 CALLING GLOBAL FACTORY FUNCTIONS")
+			console.log("⚙️ ConfigureFunctions: About to call enableRedisMode with host:", redisConfig.host, "simplified:", useSimplifiedRegistry)
+
 			enableRedisMode(redisConfig.host, useSimplifiedRegistry)
+			console.log("⚙️ ConfigureFunctions: ✅ enableRedisMode() called successfully")
 
 			// Also set the simplified registry flag directly
 			setUseSimplifiedRegistry(useSimplifiedRegistry)
+			console.log("⚙️ ConfigureFunctions: ✅ setUseSimplifiedRegistry() called successfully")
+
+			console.log("⚙️ ConfigureFunctions: 🌍 GLOBAL CONFIGURATION SHOULD NOW BE SET")
 
 			// Test connection if requested
 			if (testConnection) {

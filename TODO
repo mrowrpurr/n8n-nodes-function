@@ -1,1 +1,6 @@
 if possible, keyboard shortcut to goto target workflow of global function
+
+const readOnlyKeymap = {
+    ctrl_shift_o: emitWithLastSelectedNode((id) => emit('open:sub-workflow', id)),
+    // ... other shortcuts
+};
