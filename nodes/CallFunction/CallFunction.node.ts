@@ -85,6 +85,9 @@ export class CallFunction implements INodeType {
 				default: "individual",
 				description: "How to specify the function parameters",
 				displayOptions: {
+					show: {
+						functionName: [{ _cnd: { exists: true } }],
+					},
 					hide: {
 						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
 					},
@@ -99,6 +102,7 @@ export class CallFunction implements INodeType {
 				displayOptions: {
 					show: {
 						parameterMode: ["json"],
+						functionName: [{ _cnd: { exists: true } }],
 					},
 					hide: {
 						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
@@ -119,6 +123,7 @@ export class CallFunction implements INodeType {
 				displayOptions: {
 					show: {
 						parameterMode: ["individual"],
+						functionName: [{ _cnd: { exists: true } }],
 					},
 					hide: {
 						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
@@ -158,6 +163,9 @@ export class CallFunction implements INodeType {
 				default: false,
 				description: "Whether to store the function's return value in the output item",
 				displayOptions: {
+					show: {
+						functionName: [{ _cnd: { exists: true } }],
+					},
 					hide: {
 						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
 					},
@@ -173,6 +181,7 @@ export class CallFunction implements INodeType {
 				displayOptions: {
 					show: {
 						storeResponse: [true],
+						functionName: [{ _cnd: { exists: true } }],
 					},
 					hide: {
 						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
