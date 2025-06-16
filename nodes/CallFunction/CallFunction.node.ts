@@ -561,54 +561,14 @@ export class CallFunction implements INodeType {
 						logger.log("🔍 DIAGNOSTIC: Stream is ready, proceeding with call")
 					}
 
-					// Add call to stream
-					await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel, 30000)
+					// Add call to stream (no timeout)
+					await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel)
 
 					logger.log("🌊 CallFunction: Call added to stream, waiting for response...")
+					logger.log("🌊 CallFunction: Note: Function MUST use ReturnFromFunction node or this will wait FOREVER")
 
-					// Wait for response with retry logic for the first call
-					let response
-					let retryCount = 0
-					const maxRetries = 2
-					let currentResponseChannel = responseChannel
-
-					while (retryCount <= maxRetries) {
-						try {
-							logger.log("🔍 DIAGNOSTIC: Waiting for response on channel:", currentResponseChannel)
-							logger.log("🔍 DIAGNOSTIC: Timeout: 15 seconds")
-							logger.log("🔍 DIAGNOSTIC: If Function doesn't have ReturnFromFunction, this WILL timeout!")
-
-							response = await registry.waitForResponse(currentResponseChannel, 15) // 15 second timeout per attempt
-							break // Success, exit retry loop
-						} catch (error) {
-							retryCount++
-							logger.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
-
-							logger.log("🔍 DIAGNOSTIC: Response timeout or error occurred")
-							logger.log("🔍 DIAGNOSTIC: Error message:", error.message)
-							logger.log("🔍 DIAGNOSTIC: Is this 'Response timeout'?", error.message.includes("timeout"))
-							logger.log("🔍 DIAGNOSTIC: This confirms Function didn't send a response")
-
-							if (retryCount <= maxRetries) {
-								logger.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)
-								await new Promise((resolve) => setTimeout(resolve, 2000))
-
-								// Generate new call ID for retry
-								const retryCallId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-								const retryResponseChannel = `function:response:${retryCallId}`
-
-								logger.log("🌊 CallFunction: Retry call ID:", retryCallId)
-
-								// Add retry call to stream
-								await registry.addCall(streamKey, retryCallId, functionName, functionParameters, item, retryResponseChannel, 30000)
-
-								// Update response channel for this attempt
-								currentResponseChannel = retryResponseChannel
-							} else {
-								throw error // Re-throw the last error if all retries failed
-							}
-						}
-					}
+					// Wait for response with NO timeout - will wait forever until ReturnFromFunction responds
+					const response = await registry.waitForResponse(responseChannel, 0) // 0 = infinite wait
 
 					logger.log("🌊 CallFunction: Received response:", response)
 

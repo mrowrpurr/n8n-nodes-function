@@ -415,35 +415,11 @@ export class Function implements INodeType {
 								// Emit the item to continue the workflow
 								this.emit([[outputItem]])
 
-								// DIAGNOSTIC LOGGING: Check if we're sending a response
-								logger.log("🔍 DIAGNOSTIC: Function execution completed, checking response handling")
-								logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
-								logger.log("🔍 DIAGNOSTIC: Call ID:", callId)
-								logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
-
-								// Wait a bit to see if ReturnFromFunction will handle the response
-								await new Promise((resolve) => setTimeout(resolve, 50))
-
-								// Check if ReturnFromFunction already handled the response
-								const responseAlreadySent = await registry.isResponseSent(callId)
-
-								if (!responseAlreadySent) {
-									// FIX: Send default response to prevent timeout
-									logger.log("🔍 DIAGNOSTIC: No ReturnFromFunction detected, sending default response")
-									await registry.publishResponse(responseChannel, {
-										success: true,
-										data: outputItem.json,
-										callId,
-										timestamp: Date.now(),
-									})
-									await registry.markResponseSent(callId)
-									await registry.acknowledgeCall(streamKey, groupName, message.id)
-									logger.log("🔍 DIAGNOSTIC: Default response sent successfully")
-								} else {
-									logger.log("🔍 DIAGNOSTIC: Response already sent by ReturnFromFunction")
-									// Just acknowledge the message
-									await registry.acknowledgeCall(streamKey, groupName, message.id)
-								}
+								// Function execution complete - ReturnFromFunction node is responsible for sending response
+								logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
+								logger.log("🌊 Function: Response channel:", responseChannel)
+								logger.log("🌊 Function: Call ID:", callId)
+								logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
 							} catch (error) {
 								logger.error("🌊 Function: Error processing message:", error)
 
@@ -672,27 +648,14 @@ export class Function implements INodeType {
 					logger.log("🌊 Function: Emitting output item to downstream nodes")
 					this.emit([[outputItem]])
 
-					// Use promise-based return handling like the reference implementation
-					logger.log("🌊 Function: Setting up promise-based return handling...")
+					// Function execution complete - ReturnFromFunction node is responsible for handling return value
+					logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
+					logger.log("🌊 Function: Call ID:", callId)
+					logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction resolves return value")
 
-					// Create a return promise for this execution
-					const returnPromise = registry.createReturnPromise(callId)
-					logger.log("🌊 Function: Return promise created")
-
-					// Wait for return value from ReturnFromFunction node
-					let returnValue = null
-
-					try {
-						returnValue = await returnPromise
-						logger.log("🌊 Function: ✅ Return value received via promise:", returnValue)
-					} catch (error) {
-						logger.error("🌊 Function: ❌ Error occurred while waiting for return value:", error)
-						registry.cleanupReturnPromise(callId)
-						// For errors, we'll still complete the function
-						returnValue = null
-					}
-
-					logger.log("🌊 Function: Function execution completed, final return value:", returnValue)
+					// Wait forever for ReturnFromFunction to resolve the return value
+					const returnValue = await registry.waitForReturn(callId)
+					logger.log("🌊 Function: ✅ Return value received:", returnValue)
 
 					return [outputItem]
 				},

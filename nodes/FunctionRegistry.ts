@@ -237,7 +237,7 @@ class FunctionRegistry {
 	/**
 	 * Add a function call to the stream
 	 */
-	async addCall(streamKey: string, callId: string, functionName: string, parameters: any, inputItem: INodeExecutionData, responseChannel: string, timeout: number): Promise<void> {
+	async addCall(streamKey: string, callId: string, functionName: string, parameters: any, inputItem: INodeExecutionData, responseChannel: string): Promise<void> {
 		await this.ensureRedisConnection()
 		if (!this.client) throw new Error("Redis client not available")
 
@@ -247,7 +247,6 @@ class FunctionRegistry {
 			params: JSON.stringify(parameters),
 			inputItem: JSON.stringify(inputItem),
 			responseChannel,
-			timeout: timeout.toString(),
 			timestamp: Date.now().toString(),
 		})
 
@@ -350,18 +349,27 @@ class FunctionRegistry {
 		if (!this.client) throw new Error("Redis client not available")
 
 		try {
-			logger.log("🔍 DIAGNOSTIC: Waiting for response with BLPOP")
-			logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
-			logger.log("🔍 DIAGNOSTIC: Timeout:", timeoutSeconds, "seconds")
-			const startWait = Date.now()
+			if (timeoutSeconds === 0) {
+				logger.log("🔍 DIAGNOSTIC: Waiting for response with BLPOP (INFINITE WAIT)")
+				logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
+				logger.log("🔍 DIAGNOSTIC: Will wait FOREVER until ReturnFromFunction responds")
+			} else {
+				logger.log("🔍 DIAGNOSTIC: Waiting for response with BLPOP")
+				logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
+				logger.log("🔍 DIAGNOSTIC: Timeout:", timeoutSeconds, "seconds")
+			}
 
 			const result = await this.client.blPop(responseChannel, timeoutSeconds)
 
 			if (!result) {
-				const waitDuration = Date.now() - startWait
-				logger.log("🔍 DIAGNOSTIC: BLPOP returned null after", waitDuration, "ms")
-				logger.log("🔍 DIAGNOSTIC: This means no response was received - Function didn't send one!")
-				throw new Error("Response timeout")
+				if (timeoutSeconds > 0) {
+					logger.log("🔍 DIAGNOSTIC: BLPOP returned null - timeout occurred")
+					throw new Error("Response timeout")
+				} else {
+					// This should never happen with infinite wait, but just in case
+					logger.error("🔍 DIAGNOSTIC: BLPOP returned null with infinite wait - this is unexpected!")
+					throw new Error("Unexpected null response with infinite wait")
+				}
 			}
 
 			const response = JSON.parse(result.element)
@@ -1071,7 +1079,8 @@ class FunctionRegistry {
 
 	// Promise-based return handling methods
 	async createReturnPromise(executionId: string): Promise<any> {
-		logger.log(`⭐ Creating return promise for execution: ${executionId}`)
+		logger.log(`⭐ Creating return promise for execution: ${executionId} (INFINITE WAIT)`)
+		logger.log(`⭐ This promise will wait FOREVER until ReturnFromFunction resolves it`)
 
 		if (this.returnPromises.has(executionId)) {
 			logger.warn(`⚠️ Promise already exists for execution: ${executionId}`)
@@ -1116,7 +1125,8 @@ class FunctionRegistry {
 	}
 
 	async waitForReturn(executionId: string): Promise<any> {
-		logger.log(`🔍 Getting return promise for execution: ${executionId}`)
+		logger.log(`🔍 Waiting for return value for execution: ${executionId} (INFINITE WAIT)`)
+		logger.log(`🔍 Will wait FOREVER until ReturnFromFunction resolves this execution`)
 
 		// Check if value is already available in Redis
 		const existingValue = await this.getFunctionReturnValue(executionId)
@@ -1133,6 +1143,7 @@ class FunctionRegistry {
 		}
 
 		// Return a new promise that will be resolved/rejected when the stored handlers are called
+		// This will wait FOREVER until ReturnFromFunction calls resolveReturn()
 		return new Promise((resolve, reject) => {
 			const originalResolve = promiseHandlers.resolve
 			const originalReject = promiseHandlers.reject
