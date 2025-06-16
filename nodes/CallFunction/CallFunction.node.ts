@@ -5,7 +5,9 @@ import {
 	type INodeType,
 	type INodeTypeDescription,
 	type ILoadOptionsFunctions,
+	type ILocalLoadOptionsFunctions,
 	NodeOperationError,
+	type ResourceMapperFields,
 } from "n8n-workflow"
 import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
@@ -67,14 +69,50 @@ export class CallFunction implements INodeType {
 				description: "Internal field to track workflow changes",
 			},
 			{
+				displayName: "Function Parameters",
+				name: "functionParameters",
+				type: "resourceMapper",
+				noDataExpression: true,
+				default: {
+					mappingMode: "defineBelow",
+					value: null,
+				},
+				typeOptions: {
+					loadOptionsDependsOn: ["functionName"],
+					resourceMapper: {
+						localResourceMapperMethod: "getFunctionParametersForMapper",
+						valuesLabel: "Function Parameters",
+						mode: "map",
+						fieldWords: {
+							singular: "parameter",
+							plural: "parameters",
+						},
+						addAllFields: true,
+						multiKeyMatch: false,
+						supportAutoMap: false,
+						showTypeConversionOptions: true,
+					},
+				},
+				displayOptions: {
+					hide: {
+						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
+					},
+				},
+			},
+			{
 				displayName: "Parameter Mode",
 				name: "parameterMode",
 				type: "options",
 				options: [
 					{
+						name: "Use Parameter Mapper Above",
+						value: "mapper",
+						description: "Use the parameter mapper above to set function parameters",
+					},
+					{
 						name: "Individual Parameters",
 						value: "individual",
-						description: "Specify each parameter individually",
+						description: "Specify each parameter individually (legacy mode)",
 					},
 					{
 						name: "JSON Object",
@@ -82,7 +120,7 @@ export class CallFunction implements INodeType {
 						description: "Pass all parameters as a single JSON object",
 					},
 				],
-				default: "individual",
+				default: "mapper",
 				description: "How to specify the function parameters",
 				displayOptions: {
 					hide: {
@@ -180,6 +218,73 @@ export class CallFunction implements INodeType {
 	}
 
 	methods = {
+		localResourceMapping: {
+			async getFunctionParametersForMapper(this: ILocalLoadOptionsFunctions): Promise<ResourceMapperFields> {
+				logger.log("🔧 CallFunction: Loading function parameters for resource mapper")
+
+				// Get the workflow node context to access parameters
+				const context = await this.getWorkflowNodeContext("callFunction")
+				if (!context) {
+					return {
+						fields: [],
+						emptyFieldsNotice: "Unable to access node context for parameter loading.",
+					}
+				}
+
+				const functionName = context.getNodeParameter("functionName", 0) as string
+				const workflowSelector = context.getNodeParameter("workflowId", 0) as any
+
+				logger.log("🔧 CallFunction: Function name:", functionName)
+				logger.log("🔧 CallFunction: Workflow selector:", workflowSelector)
+
+				if (!functionName || functionName === "__no_workflow_selected__" || functionName === "__no_functions__" || functionName === "__activate_workflow__") {
+					return {
+						fields: [],
+						emptyFieldsNotice: "Please select a valid function first to see its parameters.",
+					}
+				}
+
+				// Extract the actual workflow ID from the selector object
+				let workflowId: string = ""
+				if (workflowSelector && typeof workflowSelector === "object" && workflowSelector.value) {
+					workflowId = workflowSelector.value
+				} else if (typeof workflowSelector === "string") {
+					workflowId = workflowSelector
+				}
+
+				if (!workflowId) {
+					return {
+						fields: [],
+						emptyFieldsNotice: "Please select a workflow first to see function parameters.",
+					}
+				}
+
+				const registry = await getFunctionRegistry()
+				const parameters = await registry.getFunctionParameters(functionName, workflowId)
+
+				logger.log("🔧 CallFunction: Found parameters for mapper:", parameters)
+
+				// Convert function parameters to resource mapper fields
+				const fields = parameters.map((param) => ({
+					id: param.name,
+					displayName: param.name,
+					required: param.required || false,
+					defaultMatch: param.required || false, // Auto-select required parameters
+					canBeUsedToMatch: false,
+					display: true,
+					type: param.type as any, // Convert to FieldType
+					description: param.description || `${param.type} parameter${param.required ? " (required)" : ""}`,
+				}))
+
+				// Provide helpful message when no parameters are found
+				let emptyFieldsNotice: string | undefined
+				if (fields.length === 0) {
+					emptyFieldsNotice = `The selected function "${functionName}" doesn't require any parameters. You can call it directly without providing inputs.`
+				}
+
+				return { fields, emptyFieldsNotice }
+			},
+		},
 		loadOptions: {
 			async getAvailableFunctions(this: ILoadOptionsFunctions) {
 				logger.log("🔧 CallFunction: Loading available functions for dropdown")
@@ -393,7 +498,15 @@ export class CallFunction implements INodeType {
 			// Prepare parameters to pass to the function
 			let functionParameters: Record<string, any> = {}
 
-			if (parameterMode === "json") {
+			if (parameterMode === "mapper") {
+				// Use the resource mapper for parameters
+				const functionParametersMapper = this.getNodeParameter("functionParameters", itemIndex) as any
+				logger.log("🔧 CallFunction: Resource mapper parameters =", functionParametersMapper)
+
+				if (functionParametersMapper && functionParametersMapper.value) {
+					functionParameters = functionParametersMapper.value
+				}
+			} else if (parameterMode === "json") {
 				const parametersJson = this.getNodeParameter("parametersJson", itemIndex) as string
 				logger.log("🔧 CallFunction: Raw JSON parameters =", parametersJson)
 				try {
