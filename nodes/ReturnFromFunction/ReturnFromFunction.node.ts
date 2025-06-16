@@ -151,6 +151,9 @@ export class ReturnFromFunction implements INodeType {
 					logger.log("🔍 DIAGNOSTIC: Response channel:", callContext.responseChannel)
 					logger.log("🔍 DIAGNOSTIC: This WILL prevent CallFunction timeout")
 
+					// Mark that we're sending a response
+					await registry.markResponseSent(callContext.callId)
+
 					// Publish successful response
 					await registry.publishResponse(callContext.responseChannel, {
 						success: true,

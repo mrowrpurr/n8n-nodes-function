@@ -543,10 +543,10 @@ export class CallFunction implements INodeType {
 					logger.log("🔍 DIAGNOSTIC: Checking if stream is ready")
 					logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
 					logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
-					logger.log("🔍 DIAGNOSTIC: Timeout: 500ms (THIS IS TOO SHORT!)")
+					logger.log("🔍 DIAGNOSTIC: Timeout: 3000ms (increased from 500ms)")
 
 					const startTime = Date.now()
-					const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
+					const isReady = await registry.waitForStreamReady(streamKey, groupName, 3000) // Increased to 3 seconds
 					const checkDuration = Date.now() - startTime
 
 					logger.log("🔍 DIAGNOSTIC: Stream ready check completed")
@@ -554,8 +554,8 @@ export class CallFunction implements INodeType {
 					logger.log("🔍 DIAGNOSTIC: Check duration:", checkDuration, "ms")
 
 					if (!isReady) {
-						logger.warn("🔍 DIAGNOSTIC: Stream not ready after 500ms - this is likely why first calls fail!")
-						logger.warn("🔍 DIAGNOSTIC: Function consumer might still be starting up")
+						logger.warn("🔍 DIAGNOSTIC: Stream not ready after 3000ms - consumer may have issues")
+						logger.warn("🔍 DIAGNOSTIC: Function consumer might still be starting up or not running")
 						// Don't throw error immediately, try the call - it might work if function is just starting
 					} else {
 						logger.log("🔍 DIAGNOSTIC: Stream is ready, proceeding with call")

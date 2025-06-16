@@ -238,6 +238,17 @@ export class Function implements INodeType {
 				}
 			}
 
+			// Check if there's already an active consumer for this function
+			if (registry.isConsumerActive(functionName, scope)) {
+				logger.log("🔍 DIAGNOSTIC: Found existing consumer for this function, stopping it first")
+				registry.stopConsumer(functionName, scope)
+				// Give it a moment to stop
+				await new Promise((resolve) => setTimeout(resolve, 100))
+			}
+
+			// Register this consumer
+			registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
+
 			// Start the stream consumer loop
 			let isActive = true
 			const processStreamMessages = async () => {
@@ -246,7 +257,7 @@ export class Function implements INodeType {
 				logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
 				logger.log("🔍 DIAGNOSTIC: Consumer name:", consumerName)
 
-				while (isActive) {
+				while (isActive && registry.isConsumerActive(functionName, scope)) {
 					try {
 						// Read messages from stream (blocking for 1 second)
 						const messages = await registry.readCalls(streamKey, groupName, consumerName, 1, 1000)
@@ -409,18 +420,30 @@ export class Function implements INodeType {
 								logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
 								logger.log("🔍 DIAGNOSTIC: Call ID:", callId)
 								logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
-								logger.log("🔍 DIAGNOSTIC: About to send response: NO - Function node doesn't send success responses!")
-								logger.log("🔍 DIAGNOSTIC: This will cause CallFunction to timeout after 15 seconds")
 
-								// TODO: Add this code to fix the issue:
-								// await registry.publishResponse(responseChannel, {
-								//     success: true,
-								//     data: outputItem.json,
-								//     callId,
-								//     timestamp: Date.now(),
-								// })
-								// await registry.acknowledgeCall(streamKey, groupName, message.id)
-								// logger.log("🔍 DIAGNOSTIC: Response sent successfully")
+								// Wait a bit to see if ReturnFromFunction will handle the response
+								await new Promise((resolve) => setTimeout(resolve, 50))
+
+								// Check if ReturnFromFunction already handled the response
+								const responseAlreadySent = await registry.isResponseSent(callId)
+
+								if (!responseAlreadySent) {
+									// FIX: Send default response to prevent timeout
+									logger.log("🔍 DIAGNOSTIC: No ReturnFromFunction detected, sending default response")
+									await registry.publishResponse(responseChannel, {
+										success: true,
+										data: outputItem.json,
+										callId,
+										timestamp: Date.now(),
+									})
+									await registry.markResponseSent(callId)
+									await registry.acknowledgeCall(streamKey, groupName, message.id)
+									logger.log("🔍 DIAGNOSTIC: Default response sent successfully")
+								} else {
+									logger.log("🔍 DIAGNOSTIC: Response already sent by ReturnFromFunction")
+									// Just acknowledge the message
+									await registry.acknowledgeCall(streamKey, groupName, message.id)
+								}
 							} catch (error) {
 								logger.error("🌊 Function: Error processing message:", error)
 
@@ -474,6 +497,10 @@ export class Function implements INodeType {
 
 					// Stop the consumer loop
 					isActive = false
+					registry.stopConsumer(functionName, scope)
+
+					// Give consumer time to stop
+					await new Promise((resolve) => setTimeout(resolve, 100))
 
 					// Stop heartbeat
 					registry.stopHeartbeat(functionName, scope)
@@ -483,6 +510,8 @@ export class Function implements INodeType {
 
 					// Clean up stream
 					await registry.cleanupStream(streamKey, groupName)
+
+					logger.log("🌊 Function: Cleanup complete")
 				},
 				// Emit initial trigger data to activate the workflow
 				manualTriggerFunction: async () => {

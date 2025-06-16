@@ -48,6 +48,7 @@ class FunctionRegistry {
 	// Stream-related properties
 	private streamConsumers: Map<string, boolean> = new Map() // Track active stream consumers
 	private heartbeatIntervals: Map<string, any> = new Map() // Track heartbeat timers
+	private activeConsumers: Map<string, { streamKey: string; groupName: string; consumerName: string; isActive: boolean }> = new Map() // Track all active consumers
 
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
@@ -312,6 +313,36 @@ class FunctionRegistry {
 	}
 
 	/**
+	 * Check if response was already sent
+	 */
+	async isResponseSent(callId: string): Promise<boolean> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return false
+
+			const exists = await this.client.exists(`function:response:sent:${callId}`)
+			return exists > 0
+		} catch (error) {
+			logger.error(`Error checking response status:`, error)
+			return false
+		}
+	}
+
+	/**
+	 * Mark response as sent
+	 */
+	async markResponseSent(callId: string): Promise<void> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return
+
+			await this.client.set(`function:response:sent:${callId}`, "1", { EX: 60 })
+		} catch (error) {
+			logger.error(`Error marking response as sent:`, error)
+		}
+	}
+
+	/**
 	 * Wait for response from function call (using BLPOP)
 	 */
 	async waitForResponse(responseChannel: string, timeoutSeconds: number): Promise<any> {
@@ -413,12 +444,56 @@ class FunctionRegistry {
 	}
 
 	/**
+	 * Register an active consumer
+	 */
+	registerConsumer(functionName: string, scope: string, streamKey: string, groupName: string, consumerName: string): void {
+		const consumerKey = `${scope}:${functionName}`
+		logger.log(`Registering consumer for ${consumerKey}: ${consumerName}`)
+		this.activeConsumers.set(consumerKey, {
+			streamKey,
+			groupName,
+			consumerName,
+			isActive: true,
+		})
+	}
+
+	/**
+	 * Stop a consumer
+	 */
+	stopConsumer(functionName: string, scope: string): void {
+		const consumerKey = `${scope}:${functionName}`
+		const consumer = this.activeConsumers.get(consumerKey)
+		if (consumer) {
+			logger.log(`Stopping consumer for ${consumerKey}: ${consumer.consumerName}`)
+			consumer.isActive = false
+		}
+	}
+
+	/**
+	 * Check if consumer is active
+	 */
+	isConsumerActive(functionName: string, scope: string): boolean {
+		const consumerKey = `${scope}:${functionName}`
+		const consumer = this.activeConsumers.get(consumerKey)
+		return consumer?.isActive || false
+	}
+
+	/**
 	 * Clean up stream and consumer group
 	 */
 	async cleanupStream(streamKey: string, groupName: string): Promise<void> {
 		try {
 			await this.ensureRedisConnection()
 			if (!this.client) return
+
+			// First, remove any pending messages for this consumer group
+			try {
+				// Get pending messages
+				const pending = await this.client.xPending(streamKey, groupName)
+				logger.log(`Found ${pending.pending} pending messages for ${groupName}`)
+			} catch (pendingError) {
+				logger.log(`No pending messages or error checking: ${pendingError.message}`)
+			}
 
 			// Destroy consumer group
 			await this.client.xGroupDestroy(streamKey, groupName)
