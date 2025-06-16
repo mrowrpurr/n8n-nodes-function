@@ -526,6 +526,7 @@ export class CallFunction implements INodeType {
 					const healthyWorkers = []
 					for (const workerId of availableWorkers) {
 						const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
+						logger.log("🔍 DIAGNOSTIC: Worker health check - Worker:", workerId, "Healthy:", isHealthy)
 						if (isHealthy) {
 							healthyWorkers.push(workerId)
 						}
@@ -539,15 +540,25 @@ export class CallFunction implements INodeType {
 
 					// Check if stream is ready before making the call
 					const groupName = `group:${functionName}`
-					logger.log("🌊 CallFunction: Checking if stream is ready:", streamKey)
+					logger.log("🔍 DIAGNOSTIC: Checking if stream is ready")
+					logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
+					logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
+					logger.log("🔍 DIAGNOSTIC: Timeout: 500ms (THIS IS TOO SHORT!)")
 
+					const startTime = Date.now()
 					const isReady = await registry.waitForStreamReady(streamKey, groupName, 500) // 500ms timeout
+					const checkDuration = Date.now() - startTime
+
+					logger.log("🔍 DIAGNOSTIC: Stream ready check completed")
+					logger.log("🔍 DIAGNOSTIC: Is ready:", isReady)
+					logger.log("🔍 DIAGNOSTIC: Check duration:", checkDuration, "ms")
 
 					if (!isReady) {
-						logger.warn("🌊 CallFunction: Stream not ready, attempting call anyway (function may be starting up)")
+						logger.warn("🔍 DIAGNOSTIC: Stream not ready after 500ms - this is likely why first calls fail!")
+						logger.warn("🔍 DIAGNOSTIC: Function consumer might still be starting up")
 						// Don't throw error immediately, try the call - it might work if function is just starting
 					} else {
-						logger.log("🌊 CallFunction: Stream is ready, proceeding with call")
+						logger.log("🔍 DIAGNOSTIC: Stream is ready, proceeding with call")
 					}
 
 					// Add call to stream
@@ -563,11 +574,20 @@ export class CallFunction implements INodeType {
 
 					while (retryCount <= maxRetries) {
 						try {
+							logger.log("🔍 DIAGNOSTIC: Waiting for response on channel:", currentResponseChannel)
+							logger.log("🔍 DIAGNOSTIC: Timeout: 15 seconds")
+							logger.log("🔍 DIAGNOSTIC: If Function doesn't have ReturnFromFunction, this WILL timeout!")
+
 							response = await registry.waitForResponse(currentResponseChannel, 15) // 15 second timeout per attempt
 							break // Success, exit retry loop
 						} catch (error) {
 							retryCount++
 							logger.log(`🌊 CallFunction: Attempt ${retryCount} failed:`, error.message)
+
+							logger.log("🔍 DIAGNOSTIC: Response timeout or error occurred")
+							logger.log("🔍 DIAGNOSTIC: Error message:", error.message)
+							logger.log("🔍 DIAGNOSTIC: Is this 'Response timeout'?", error.message.includes("timeout"))
+							logger.log("🔍 DIAGNOSTIC: This confirms Function didn't send a response")
 
 							if (retryCount <= maxRetries) {
 								logger.log(`🌊 CallFunction: Retrying in 2 seconds... (${retryCount}/${maxRetries})`)

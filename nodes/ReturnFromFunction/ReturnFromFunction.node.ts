@@ -147,6 +147,10 @@ export class ReturnFromFunction implements INodeType {
 			if (isQueueModeEnabled()) {
 				logger.log("🌊 ReturnFromFunction: Queue mode enabled, using Redis streams")
 				try {
+					logger.log("🔍 DIAGNOSTIC: ReturnFromFunction sending success response")
+					logger.log("🔍 DIAGNOSTIC: Response channel:", callContext.responseChannel)
+					logger.log("🔍 DIAGNOSTIC: This WILL prevent CallFunction timeout")
+
 					// Publish successful response
 					await registry.publishResponse(callContext.responseChannel, {
 						success: true,

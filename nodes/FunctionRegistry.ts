@@ -319,9 +319,17 @@ class FunctionRegistry {
 		if (!this.client) throw new Error("Redis client not available")
 
 		try {
+			logger.log("🔍 DIAGNOSTIC: Waiting for response with BLPOP")
+			logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
+			logger.log("🔍 DIAGNOSTIC: Timeout:", timeoutSeconds, "seconds")
+			const startWait = Date.now()
+
 			const result = await this.client.blPop(responseChannel, timeoutSeconds)
 
 			if (!result) {
+				const waitDuration = Date.now() - startWait
+				logger.log("🔍 DIAGNOSTIC: BLPOP returned null after", waitDuration, "ms")
+				logger.log("🔍 DIAGNOSTIC: This means no response was received - Function didn't send one!")
 				throw new Error("Response timeout")
 			}
 
@@ -387,6 +395,16 @@ class FunctionRegistry {
 			if (!lastHeartbeat) return false
 
 			const age = Date.now() - parseInt(lastHeartbeat)
+
+			logger.log("🔍 DIAGNOSTIC: Checking worker health")
+			logger.log("🔍 DIAGNOSTIC: Worker ID:", workerId)
+			logger.log("🔍 DIAGNOSTIC: Function name:", functionName)
+			logger.log("🔍 DIAGNOSTIC: Last heartbeat:", lastHeartbeat)
+			logger.log("🔍 DIAGNOSTIC: Current time:", Date.now())
+			logger.log("🔍 DIAGNOSTIC: Age:", age, "ms")
+			logger.log("🔍 DIAGNOSTIC: Max age allowed:", maxAgeMs, "ms")
+			logger.log("🔍 DIAGNOSTIC: Is healthy:", age <= maxAgeMs)
+
 			return age <= maxAgeMs
 		} catch (error) {
 			logger.error(`Error checking worker health:`, error)
@@ -513,9 +531,21 @@ class FunctionRegistry {
 	async waitForStreamReady(streamKey: string, groupName: string, timeoutMs: number = 2000): Promise<boolean> {
 		const startTime = Date.now()
 		const checkInterval = 20 // Check every 20ms
+		let checkCount = 0
 
 		while (Date.now() - startTime < timeoutMs) {
-			if (await this.isStreamReady(streamKey, groupName)) {
+			checkCount++
+			const isReady = await this.isStreamReady(streamKey, groupName)
+
+			if (checkCount === 1 || checkCount % 10 === 0) {
+				logger.log(`🔍 DIAGNOSTIC: Stream readiness check #${checkCount}`)
+				logger.log(`🔍 DIAGNOSTIC: Stream key: ${streamKey}`)
+				logger.log(`🔍 DIAGNOSTIC: Is ready: ${isReady}`)
+				logger.log(`🔍 DIAGNOSTIC: Time elapsed: ${Date.now() - startTime}ms`)
+			}
+
+			if (isReady) {
+				logger.log(`🔍 DIAGNOSTIC: Stream became ready after ${Date.now() - startTime}ms and ${checkCount} checks`)
 				return true
 			}
 
@@ -523,6 +553,7 @@ class FunctionRegistry {
 			await new Promise((resolve) => setTimeout(resolve, checkInterval))
 		}
 
+		logger.log(`🔍 DIAGNOSTIC: Stream readiness timeout after ${timeoutMs}ms and ${checkCount} checks`)
 		logger.log(`Timeout waiting for stream to be ready: ${streamKey}`)
 		return false
 	}

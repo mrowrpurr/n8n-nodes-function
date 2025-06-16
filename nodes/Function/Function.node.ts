@@ -241,10 +241,20 @@ export class Function implements INodeType {
 			// Start the stream consumer loop
 			let isActive = true
 			const processStreamMessages = async () => {
+				logger.log("🔍 DIAGNOSTIC: Stream consumer loop starting")
+				logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
+				logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
+				logger.log("🔍 DIAGNOSTIC: Consumer name:", consumerName)
+
 				while (isActive) {
 					try {
 						// Read messages from stream (blocking for 1 second)
 						const messages = await registry.readCalls(streamKey, groupName, consumerName, 1, 1000)
+
+						if (messages.length > 0) {
+							logger.log("🔍 DIAGNOSTIC: Stream consumer is now fully operational!")
+							logger.log("🔍 DIAGNOSTIC: First message received at:", new Date().toISOString())
+						}
 
 						for (const message of messages) {
 							if (!isActive) break
@@ -393,6 +403,24 @@ export class Function implements INodeType {
 
 								// Emit the item to continue the workflow
 								this.emit([[outputItem]])
+
+								// DIAGNOSTIC LOGGING: Check if we're sending a response
+								logger.log("🔍 DIAGNOSTIC: Function execution completed, checking response handling")
+								logger.log("🔍 DIAGNOSTIC: Response channel:", responseChannel)
+								logger.log("🔍 DIAGNOSTIC: Call ID:", callId)
+								logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
+								logger.log("🔍 DIAGNOSTIC: About to send response: NO - Function node doesn't send success responses!")
+								logger.log("🔍 DIAGNOSTIC: This will cause CallFunction to timeout after 15 seconds")
+
+								// TODO: Add this code to fix the issue:
+								// await registry.publishResponse(responseChannel, {
+								//     success: true,
+								//     data: outputItem.json,
+								//     callId,
+								//     timestamp: Date.now(),
+								// })
+								// await registry.acknowledgeCall(streamKey, groupName, message.id)
+								// logger.log("🔍 DIAGNOSTIC: Response sent successfully")
 							} catch (error) {
 								logger.error("🌊 Function: Error processing message:", error)
 
@@ -410,6 +438,9 @@ export class Function implements INodeType {
 
 									// Acknowledge the message even on error to prevent reprocessing
 									await registry.acknowledgeCall(streamKey, groupName, message.id)
+
+									logger.log("🔍 DIAGNOSTIC: Error occurred, sending error response")
+									logger.log("🔍 DIAGNOSTIC: This is the ONLY time Function sends responses!")
 								} catch (responseError) {
 									logger.error("🌊 Function: Error sending error response:", responseError)
 								}
@@ -429,6 +460,10 @@ export class Function implements INodeType {
 			processStreamMessages().catch((error) => {
 				logger.error("🌊 Function: Fatal error in stream consumer:", error)
 			})
+
+			logger.log("🔍 DIAGNOSTIC: Stream consumer loop started asynchronously")
+			logger.log("🔍 DIAGNOSTIC: Consumer might not be ready immediately!")
+			logger.log("🔍 DIAGNOSTIC: This could cause first calls to fail")
 
 			logger.info("Function registered successfully, starting stream consumer")
 
