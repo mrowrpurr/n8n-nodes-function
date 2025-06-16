@@ -50,6 +50,10 @@ class FunctionRegistry {
 	private heartbeatIntervals: Map<string, any> = new Map() // Track heartbeat timers
 	private activeConsumers: Map<string, { streamKey: string; groupName: string; consumerName: string; isActive: boolean }> = new Map() // Track all active consumers
 
+	// Workflow context cache for proper scoping
+	private workflowFunctionCache: Map<string, Set<string>> = new Map() // workflowId -> Set of function names
+	private functionToWorkflowCache: Map<string, string> = new Map() // functionName -> workflowId
+
 	static getInstance(): FunctionRegistry {
 		if (!FunctionRegistry.instance) {
 			FunctionRegistry.instance = new FunctionRegistry()
@@ -740,6 +744,9 @@ class FunctionRegistry {
 			callback,
 		})
 
+		// Update workflow context cache for proper scoping
+		this.updateWorkflowCache(functionName, executionId)
+
 		// Store metadata in Redis for cross-process access (only in queue mode or when forced)
 		if (!isQueueModeEnabled() && !forceRedisStorage) {
 			logger.debug(`Queue mode disabled and Redis storage not forced, skipping Redis metadata storage`)
@@ -796,6 +803,9 @@ class FunctionRegistry {
 
 		// Remove from memory
 		this.listeners.delete(key)
+
+		// Clean up workflow context cache
+		this.removeFromWorkflowCache(functionName, executionId)
 
 		// Remove from Redis (only in queue mode)
 		if (!isQueueModeEnabled()) {
@@ -949,13 +959,31 @@ class FunctionRegistry {
 		logger.log(`Getting available functions for scope: ${scope || "all"}`)
 		const functionNames = new Set<string>()
 
-		// Get functions from memory (local process)
-		for (const listener of this.listeners.values()) {
-			// If scope is specified, filter by execution ID (scope)
-			if (scope && listener.executionId !== scope) {
-				continue
+		// If scope is specified, use the workflow cache for accurate scoping
+		if (scope) {
+			if (scope === "__global__") {
+				// Get global functions
+				for (const listener of this.listeners.values()) {
+					if (listener.executionId === "__global__") {
+						functionNames.add(listener.functionName)
+					}
+				}
+			} else {
+				// Get functions for specific workflow using cache
+				const workflowFunctions = this.getFunctionsForWorkflow(scope)
+				for (const functionName of workflowFunctions) {
+					functionNames.add(functionName)
+				}
+				logger.log(`📋 Found ${workflowFunctions.length} functions in cache for workflow ${scope}:`, workflowFunctions)
 			}
-			functionNames.add(listener.functionName)
+		} else {
+			// No scope specified - only show global functions to prevent cross-workflow leakage
+			logger.log(`📋 No scope specified, only showing global functions`)
+			for (const listener of this.listeners.values()) {
+				if (listener.executionId === "__global__") {
+					functionNames.add(listener.functionName)
+				}
+			}
 		}
 
 		// Get functions from Redis (other processes) - only in queue mode
@@ -1272,6 +1300,49 @@ class FunctionRegistry {
 	cleanupReturnPromise(executionId: string): void {
 		logger.log(`🗑️ Cleaning up return promise for execution: ${executionId}`)
 		this.returnPromises.delete(executionId)
+	}
+
+	// Workflow context cache methods for proper scoping
+	private updateWorkflowCache(functionName: string, workflowId: string): void {
+		logger.log(`📋 Updating workflow cache: ${functionName} -> ${workflowId}`)
+
+		// Add function to workflow's function set
+		if (!this.workflowFunctionCache.has(workflowId)) {
+			this.workflowFunctionCache.set(workflowId, new Set())
+		}
+		this.workflowFunctionCache.get(workflowId)!.add(functionName)
+
+		// Map function to workflow
+		this.functionToWorkflowCache.set(functionName, workflowId)
+
+		logger.log(`📋 Cache updated - Workflow ${workflowId} now has functions:`, Array.from(this.workflowFunctionCache.get(workflowId)!))
+	}
+
+	private removeFromWorkflowCache(functionName: string, workflowId: string): void {
+		logger.log(`📋 Removing from workflow cache: ${functionName} from ${workflowId}`)
+
+		// Remove function from workflow's function set
+		const workflowFunctions = this.workflowFunctionCache.get(workflowId)
+		if (workflowFunctions) {
+			workflowFunctions.delete(functionName)
+			if (workflowFunctions.size === 0) {
+				this.workflowFunctionCache.delete(workflowId)
+			}
+		}
+
+		// Remove function to workflow mapping
+		this.functionToWorkflowCache.delete(functionName)
+
+		logger.log(`📋 Cache cleaned - Workflow ${workflowId} functions:`, workflowFunctions ? Array.from(workflowFunctions) : [])
+	}
+
+	getFunctionsForWorkflow(workflowId: string): string[] {
+		const functions = this.workflowFunctionCache.get(workflowId)
+		return functions ? Array.from(functions) : []
+	}
+
+	getWorkflowForFunction(functionName: string): string | undefined {
+		return this.functionToWorkflowCache.get(functionName)
 	}
 
 	async disconnect(): Promise<void> {

@@ -27,11 +27,12 @@ export class CallFunction implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
-				displayName: "Global Function",
-				name: "globalFunction",
-				type: "boolean",
-				default: false,
-				description: "Whether to call a globally registered function from any workflow",
+				displayName: "Workflow",
+				name: "workflowId",
+				type: "workflowSelector",
+				default: "",
+				required: true,
+				description: "Select the workflow containing the function to call",
 			},
 			{
 				displayName: "Function Name or ID",
@@ -39,12 +40,17 @@ export class CallFunction implements INodeType {
 				type: "options",
 				typeOptions: {
 					loadOptionsMethod: "getAvailableFunctions",
-					dependsOn: ["globalFunction"],
+					loadOptionsDependsOn: ["workflowId"],
 				},
 				default: "",
 				required: true,
 				description: 'Name of the function to call. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 				placeholder: "Select a function...",
+				displayOptions: {
+					hide: {
+						workflowId: [""],
+					},
+				},
 			},
 			{
 				displayName: "Last Configured Function",
@@ -170,98 +176,48 @@ export class CallFunction implements INodeType {
 		loadOptions: {
 			async getAvailableFunctions(this: ILoadOptionsFunctions) {
 				logger.log("🔧 CallFunction: Loading available functions for dropdown")
-				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
-				logger.log("🔧 CallFunction: Global function mode:", globalFunction)
+
+				// Get the selected workflow ID from the workflowSelector
+				const workflowSelector = this.getCurrentNodeParameter("workflowId") as any
+				logger.log("🔧 CallFunction: Selected workflow selector:", workflowSelector)
+
+				// Extract the actual workflow ID from the selector object
+				let workflowId: string = ""
+				if (workflowSelector && typeof workflowSelector === "object" && workflowSelector.value) {
+					workflowId = workflowSelector.value
+				} else if (typeof workflowSelector === "string") {
+					workflowId = workflowSelector
+				}
+
+				logger.log("🔧 CallFunction: Extracted workflow ID:", workflowId)
+
+				if (!workflowId) {
+					return [
+						{
+							name: "⚠️ Please Select a Workflow First",
+							value: "__no_workflow_selected__",
+							description: "Select a workflow to see available functions",
+						},
+					]
+				}
 
 				const registry = await getFunctionRegistry()
-				let availableFunctions: Array<{ name: string; value: string }>
+				const availableFunctions = await registry.getAvailableFunctions(workflowId)
 
-				if (globalFunction) {
-					// Only show global functions (scope = "__global__")
-					availableFunctions = await registry.getAvailableFunctions("__global__")
-
-					// If no global functions found, add a helpful message
-					if (availableFunctions.length === 0) {
-						return [
-							{
-								name: "⚠️ No Global Functions Available",
-								value: "__no_global_functions__",
-								description: "No global functions found. Create and activate a workflow with a global Function node.",
-							},
-						]
-					}
-				} else {
-					// Show local functions - get functions for current workflow scope
-					logger.log("🔧 CallFunction: Getting functions for current workflow scope")
-
-					// Try multiple ways to get the current workflow ID
-					let workflowId = "unknown"
-					try {
-						const workflow = this.getWorkflow()
-						logger.log("🔧 CallFunction: Workflow object:", {
-							id: workflow.id,
-							name: workflow.name,
-							active: workflow.active,
-							hasId: !!workflow.id,
-							idType: typeof workflow.id,
-							idValue: workflow.id,
-						})
-						workflowId = workflow.id || "unknown"
-					} catch (error) {
-						logger.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
-					}
-
-					// If still unknown, try to get from workflow static data
-					if (workflowId === "unknown") {
-						try {
-							const staticData = this.getWorkflowStaticData("global")
-							if (staticData && staticData.workflowId) {
-								workflowId = String(staticData.workflowId)
-								logger.log("🔧 CallFunction: Got workflow ID from static data:", workflowId)
-							}
-						} catch (error) {
-							logger.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
-						}
-					}
-
-					logger.log("🔧 CallFunction: Final workflow ID:", workflowId)
-
-					if (workflowId !== "unknown") {
-						// Get functions specifically for this workflow
-						availableFunctions = await registry.getAvailableFunctions(workflowId)
-						logger.log("🔧 CallFunction: Found functions for workflow scope:", availableFunctions)
-					} else {
-						// When workflow ID is unknown (design-time), we need a smarter approach
-						// The issue is that we can't distinguish between functions from the current workflow
-						// and functions from other workflows when the workflow ID is unknown
-						logger.log("🔧 CallFunction: Workflow ID unknown during design-time")
-
-						// For now, show all non-global functions but add a warning in the UI
-						// This is a compromise: functionality works but there's potential for cross-workflow visibility
-						logger.log("🔧 CallFunction: Showing all local functions (potential cross-workflow visibility)")
-						const allFunctions = await registry.getAvailableFunctions()
-						const globalFunctions = await registry.getAvailableFunctions("__global__")
-						const globalNames = new Set(globalFunctions.map((f) => f.value))
-						availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
-
-						logger.log("🔧 CallFunction: Found functions after filtering:", availableFunctions)
-					}
-
-					// If no local functions found, add a helpful message
-					if (availableFunctions.length === 0) {
-						return [
-							{
-								name: "⚠️ No Local Functions Available",
-								value: "__no_local_functions__",
-								description: "No local functions found. Activate the workflow to register Function nodes and refresh this list.",
-							},
-							{
-								name: "🔄 Activate Workflow to Refresh",
-								value: "__activate_workflow__",
-								description: "Click the workflow's Active toggle, then reopen this node to see available functions",
-							},
-						]
-					}
+				// If no functions found, add a helpful message
+				if (availableFunctions.length === 0) {
+					return [
+						{
+							name: "⚠️ No Functions Available in Selected Workflow",
+							value: "__no_functions__",
+							description: "The selected workflow has no Function nodes. Add Function nodes and activate the workflow.",
+						},
+						{
+							name: "🔄 Activate Workflow to Refresh",
+							value: "__activate_workflow__",
+							description: "Make sure the selected workflow is active and contains Function nodes",
+						},
+					]
 				}
 
 				logger.log("🔧 CallFunction: Available functions:", availableFunctions)
@@ -270,51 +226,32 @@ export class CallFunction implements INodeType {
 			async getFunctionParameters(this: ILoadOptionsFunctions) {
 				const functionName = this.getCurrentNodeParameter("functionName") as string
 				const lastConfiguredFunction = this.getCurrentNodeParameter("lastConfiguredFunction") as string
-				const globalFunction = this.getCurrentNodeParameter("globalFunction") as boolean
+				const workflowSelector = this.getCurrentNodeParameter("workflowId") as any
 
 				logger.log("🔧 CallFunction: Loading parameters for function:", functionName)
 				logger.log("🔧 CallFunction: Last configured function:", lastConfiguredFunction)
-				logger.log("🔧 CallFunction: Global function mode:", globalFunction)
+				logger.log("🔧 CallFunction: Selected workflow selector:", workflowSelector)
 
-				if (!functionName || functionName === "__no_local_functions__" || functionName === "__no_global_functions__" || functionName === "__activate_workflow__") {
+				// Extract the actual workflow ID from the selector object
+				let workflowId: string = ""
+				if (workflowSelector && typeof workflowSelector === "object" && workflowSelector.value) {
+					workflowId = workflowSelector.value
+				} else if (typeof workflowSelector === "string") {
+					workflowId = workflowSelector
+				}
+
+				logger.log("🔧 CallFunction: Extracted workflow ID:", workflowId)
+
+				if (!functionName || functionName === "__no_functions__" || functionName === "__no_workflow_selected__" || functionName === "__activate_workflow__") {
+					return []
+				}
+
+				if (!workflowId) {
 					return []
 				}
 
 				const registry = await getFunctionRegistry()
-				let parameters
-
-				if (globalFunction) {
-					parameters = await registry.getFunctionParameters(functionName, "__global__")
-				} else {
-					// Try multiple ways to get the workflow ID
-					let workflowId = "unknown"
-					try {
-						workflowId = this.getWorkflow().id || "unknown"
-					} catch (error) {
-						logger.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
-					}
-
-					// If still unknown, try to get from static data
-					if (workflowId === "unknown") {
-						try {
-							const staticData = this.getWorkflowStaticData("global")
-							if (staticData && staticData.workflowId) {
-								workflowId = String(staticData.workflowId)
-							}
-						} catch (error) {
-							logger.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
-						}
-					}
-
-					logger.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
-					parameters = await registry.getFunctionParameters(functionName, workflowId)
-
-					// No fallback for unknown workflow ID - this prevents parameter leakage from other workflows
-					if (parameters.length === 0 && (workflowId === "unknown" || workflowId === "")) {
-						logger.log("🔧 CallFunction: No parameters found with unknown workflow ID - this is expected during design-time")
-						// Don't try fallback without scope as this would show parameters from functions in other workflows
-					}
-				}
+				const parameters = await registry.getFunctionParameters(functionName, workflowId)
 
 				logger.log("🔧 CallFunction: Found parameters:", parameters)
 
@@ -408,35 +345,41 @@ export class CallFunction implements INodeType {
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			logger.log(`Processing item ${itemIndex + 1}/${items.length}`)
 
-			const globalFunction = this.getNodeParameter("globalFunction", itemIndex) as boolean
+			const workflowSelector = this.getNodeParameter("workflowId", itemIndex) as any
 			const functionName = this.getNodeParameter("functionName", itemIndex) as string
 			const parameterMode = this.getNodeParameter("parameterMode", itemIndex) as string
 			const storeResponse = this.getNodeParameter("storeResponse", itemIndex) as boolean
 			const responseVariableName = this.getNodeParameter("responseVariableName", itemIndex, "") as string
 
-			logger.log(`Global function =`, globalFunction)
+			// Extract the actual workflow ID from the selector object
+			let workflowId: string = ""
+			if (workflowSelector && typeof workflowSelector === "object" && workflowSelector.value) {
+				workflowId = workflowSelector.value
+			} else if (typeof workflowSelector === "string") {
+				workflowId = workflowSelector
+			}
+
+			logger.log(`Selected workflow selector =`, workflowSelector)
+			logger.log(`Extracted workflow ID =`, workflowId)
 			logger.log(`Function name =`, functionName)
 			logger.log(`Parameter mode =`, parameterMode)
 			logger.log(`Store response =`, storeResponse)
 			logger.log(`Response variable name =`, responseVariableName)
 
-			// Debug: Log the raw parameter value
-			logger.log(`Raw globalFunction parameter:`, typeof globalFunction, globalFunction)
+			if (!workflowId) {
+				throw new NodeOperationError(this.getNode(), "Please select a workflow first.")
+			}
 
-			if (!functionName || functionName === "__no_local_functions__" || functionName === "__activate_workflow__") {
-				throw new NodeOperationError(this.getNode(), "Please select a valid function. If no functions are available, activate the workflow first.")
+			if (!functionName || functionName === "__no_functions__" || functionName === "__no_workflow_selected__" || functionName === "__activate_workflow__") {
+				throw new NodeOperationError(
+					this.getNode(),
+					"Please select a valid function. If no functions are available, make sure the selected workflow is active and contains Function nodes."
+				)
 			}
 
 			// Get function parameter definitions for validation
 			const registry = await getFunctionRegistry()
-			let functionParameterDefs
-
-			if (globalFunction) {
-				functionParameterDefs = await registry.getFunctionParameters(functionName, "__global__")
-			} else {
-				const workflowId = this.getWorkflow().id || "unknown"
-				functionParameterDefs = await registry.getFunctionParameters(functionName, workflowId)
-			}
+			const functionParameterDefs = await registry.getFunctionParameters(functionName, workflowId)
 
 			const validParameterNames = new Set(functionParameterDefs.map((p: any) => p.name))
 
@@ -499,20 +442,10 @@ export class CallFunction implements INodeType {
 
 			logger.log("🔧 CallFunction: Final parameters =", functionParameters)
 
-			// Determine the scope to use based on global function setting
-			let targetScope: string
-			let workflowId: string
-
-			if (globalFunction) {
-				targetScope = "__global__"
-			} else {
-				// For non-global functions, use the current workflow ID
-				workflowId = this.getWorkflow().id || "unknown"
-				targetScope = workflowId
-			}
+			// Use the selected workflow ID as the target scope
+			const targetScope = workflowId
 
 			logger.log("🔧 CallFunction: Target scope =", targetScope)
-			logger.log("🔧 CallFunction: Global function =", globalFunction)
 
 			// Use the registry instance to call the function
 			const item = items[itemIndex]
