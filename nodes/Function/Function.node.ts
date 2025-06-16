@@ -277,10 +277,13 @@ export class Function implements INodeType {
 					logger.log("🚀 INSTANT: Control subscriber ready")
 
 					// Main consumer loop with instant response
+					logger.log("🚀 INSTANT: Starting main consumer loop")
 					while (isActive && registry.isConsumerActive(functionName, scope)) {
 						try {
+							logger.log("🚀 INSTANT: About to call readCallsInstant with BLOCK 0...")
 							// Read messages with INFINITE blocking (BLOCK 0) for instant response
 							const messages = await registry.readCallsInstant(blockingConnection, streamKey, groupName, consumerName)
+							logger.log("🚀 INSTANT: readCallsInstant returned with", messages.length, "messages")
 
 							if (!isActive) break // Check if we should stop
 

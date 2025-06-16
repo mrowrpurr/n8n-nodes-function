@@ -645,7 +645,6 @@ class FunctionRegistry {
 	 * Create a dedicated blocking connection for instant response
 	 */
 	async createDedicatedBlockingConnection(): Promise<any> {
-		await this.ensureRedisConnection()
 		if (!this.redisConfig) throw new Error("Redis configuration not set")
 
 		const clientConfig = this.buildRedisClientConfig()
@@ -660,7 +659,6 @@ class FunctionRegistry {
 	 * Create a control subscriber for graceful shutdown
 	 */
 	async createControlSubscriber(controlChannel: string, onStop: () => void): Promise<any> {
-		await this.ensureRedisConnection()
 		if (!this.redisConfig) throw new Error("Redis configuration not set")
 
 		const clientConfig = this.buildRedisClientConfig()
