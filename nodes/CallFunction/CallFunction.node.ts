@@ -40,7 +40,7 @@ export class CallFunction implements INodeType {
 				type: "options",
 				typeOptions: {
 					loadOptionsMethod: "getAvailableFunctions",
-					loadOptionsDependsOn: ["workflowId"],
+					loadOptionsDependsOn: ["workflowId.value"],
 				},
 				default: "",
 				required: true,
@@ -58,6 +58,13 @@ export class CallFunction implements INodeType {
 				type: "hidden",
 				default: "",
 				description: "Internal field to track function changes",
+			},
+			{
+				displayName: "Last Selected Workflow",
+				name: "lastSelectedWorkflow",
+				type: "hidden",
+				default: "",
+				description: "Internal field to track workflow changes",
 			},
 			{
 				displayName: "Parameter Mode",
