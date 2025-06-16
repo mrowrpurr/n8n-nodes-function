@@ -641,6 +641,84 @@ class FunctionRegistry {
 		return false
 	}
 
+	/**
+	 * Create a dedicated blocking connection for instant response
+	 */
+	async createDedicatedBlockingConnection(): Promise<any> {
+		await this.ensureRedisConnection()
+		if (!this.redisConfig) throw new Error("Redis configuration not set")
+
+		const clientConfig = this.buildRedisClientConfig()
+		const blockingClient = createClient(clientConfig)
+		await blockingClient.connect()
+
+		logger.log("🚀 INSTANT: Created dedicated blocking connection")
+		return blockingClient
+	}
+
+	/**
+	 * Create a control subscriber for graceful shutdown
+	 */
+	async createControlSubscriber(controlChannel: string, onStop: () => void): Promise<any> {
+		await this.ensureRedisConnection()
+		if (!this.redisConfig) throw new Error("Redis configuration not set")
+
+		const clientConfig = this.buildRedisClientConfig()
+		const subscriber = createClient(clientConfig)
+		await subscriber.connect()
+
+		await subscriber.subscribe(controlChannel, (message) => {
+			logger.log("🚀 INSTANT: Received control message:", message)
+			if (message === "stop") {
+				onStop()
+			}
+		})
+
+		logger.log("🚀 INSTANT: Control subscriber created for channel:", controlChannel)
+		return subscriber
+	}
+
+	/**
+	 * Read function calls with infinite blocking for instant response
+	 */
+	async readCallsInstant(blockingConnection: any, streamKey: string, groupName: string, consumerName: string): Promise<any[]> {
+		try {
+			// Use BLOCK 0 for infinite blocking - instant response when message arrives
+			const messages = await blockingConnection.xReadGroup(groupName, consumerName, [{ key: streamKey, id: ">" }], { COUNT: 1, BLOCK: 0 })
+
+			if (!messages || messages.length === 0) {
+				return []
+			}
+
+			const streamMessages = messages[0]
+			if (!streamMessages || !streamMessages.messages) {
+				return []
+			}
+
+			logger.log("🚀 INSTANT: Read", streamMessages.messages.length, "messages instantly from", streamKey)
+			return streamMessages.messages
+		} catch (error) {
+			logger.error("🚀 INSTANT: Error reading from stream:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Send stop signal to control channel
+	 */
+	async sendStopSignal(controlChannel: string): Promise<void> {
+		await this.ensureRedisConnection()
+		if (!this.client) throw new Error("Redis client not available")
+
+		try {
+			await this.client.publish(controlChannel, "stop")
+			logger.log("🚀 INSTANT: Stop signal sent to", controlChannel)
+		} catch (error) {
+			logger.error("🚀 INSTANT: Error sending stop signal:", error)
+			throw error
+		}
+	}
+
 	// ===== END REDIS STREAMS METHODS =====
 
 	async registerFunction(

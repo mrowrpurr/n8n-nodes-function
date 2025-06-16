@@ -249,210 +249,253 @@ export class Function implements INodeType {
 			// Register this consumer
 			registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
 
-			// Start the stream consumer loop
+			// Start the instant-response stream consumer with dedicated connection
 			let isActive = true
+			const controlChannel = `control:stop:${functionName}:${scope}:${consumerName}`
+
 			const processStreamMessages = async () => {
-				logger.log("🔍 DIAGNOSTIC: Stream consumer loop starting")
-				logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
-				logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
-				logger.log("🔍 DIAGNOSTIC: Consumer name:", consumerName)
+				logger.log("🚀 INSTANT: Starting instant-response consumer with dedicated connection")
+				logger.log("🚀 INSTANT: Stream key:", streamKey)
+				logger.log("🚀 INSTANT: Group name:", groupName)
+				logger.log("🚀 INSTANT: Consumer name:", consumerName)
+				logger.log("🚀 INSTANT: Control channel:", controlChannel)
 
-				while (isActive && registry.isConsumerActive(functionName, scope)) {
-					try {
-						// Read messages from stream (blocking for 1 second)
-						const messages = await registry.readCalls(streamKey, groupName, consumerName, 1, 1000)
+				// Create dedicated blocking connection for instant response
+				let blockingConnection = null
+				let controlSubscriber = null
 
-						if (messages.length > 0) {
-							logger.log("🔍 DIAGNOSTIC: Stream consumer is now fully operational!")
-							logger.log("🔍 DIAGNOSTIC: First message received at:", new Date().toISOString())
-						}
+				try {
+					// Set up dedicated blocking connection
+					blockingConnection = await registry.createDedicatedBlockingConnection()
+					logger.log("🚀 INSTANT: Dedicated blocking connection created")
 
-						for (const message of messages) {
-							if (!isActive) break
+					// Set up control subscriber for graceful shutdown
+					controlSubscriber = await registry.createControlSubscriber(controlChannel, () => {
+						logger.log("🚀 INSTANT: Received stop signal, ending consumer")
+						isActive = false
+					})
+					logger.log("🚀 INSTANT: Control subscriber ready")
 
-							try {
-								logger.log("🌊 Function: Processing stream message:", message.id)
+					// Main consumer loop with instant response
+					while (isActive && registry.isConsumerActive(functionName, scope)) {
+						try {
+							// Read messages with INFINITE blocking (BLOCK 0) for instant response
+							const messages = await registry.readCallsInstant(blockingConnection, streamKey, groupName, consumerName)
 
-								// Parse message fields
-								const callId = message.message.callId
-								const params = JSON.parse(message.message.params)
-								const inputItem = JSON.parse(message.message.inputItem)
-								const responseChannel = message.message.responseChannel
+							if (!isActive) break // Check if we should stop
 
-								logger.log("🌊 Function: Call ID:", callId)
-								logger.log("🌊 Function: Parameters:", params)
+							if (messages.length > 0) {
+								logger.log("🚀 INSTANT: Message received INSTANTLY!")
+								logger.log("🚀 INSTANT: Processing", messages.length, "messages")
+							}
 
-								// Note: We'll embed the call context in the output item instead of static data
-								// since static data doesn't transfer between workers in queue mode
+							for (const message of messages) {
+								if (!isActive) break
 
-								// Process parameters according to function definition
-								const locals: Record<string, any> = {}
-
-								for (const param of parameterList) {
-									const paramName = param.name
-									const paramType = param.type
-									const required = param.required
-									const defaultValue = param.defaultValue
-
-									let value = params[paramName]
-									logger.log("🌊 Function: Processing parameter", paramName, "=", value)
-
-									// Handle required parameters
-									if (required && (value === undefined || value === null)) {
-										throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-									}
-
-									// Use default value if not provided
-									if (value === undefined || value === null) {
-										if (defaultValue !== "") {
-											try {
-												// Try to parse default value based on type
-												switch (paramType) {
-													case "number":
-														value = Number(defaultValue)
-														break
-													case "boolean":
-														value = defaultValue.toLowerCase() === "true"
-														break
-													case "object":
-													case "array":
-														value = JSON.parse(defaultValue)
-														break
-													default:
-														value = defaultValue
-												}
-											} catch (error) {
-												value = defaultValue // Fall back to string if parsing fails
-											}
-										}
-									}
-
-									locals[paramName] = value
-								}
-
-								logger.log("🌊 Function: Final locals =", locals)
-
-								// Create the output item
-								let outputItem: INodeExecutionData = {
-									json: {
-										...inputItem.json,
-										...locals,
-										_functionCall: {
-											callId,
-											functionName,
-											timestamp: Date.now(),
-											// Embed call context for ReturnFromFunction
-											responseChannel,
-											messageId: message.id,
-											streamKey,
-											groupName,
-										},
-									},
-									index: 0,
-									binary: inputItem.binary,
-								}
-
-								// Execute user code if enabled
-								if (enableCode && code.trim()) {
-									logger.log("🌊 Function: Executing JavaScript code")
-
-									try {
-										// Execute JavaScript code with parameters as global variables
-										const context = {
-											...locals,
-											item: outputItem.json,
-											console: {
-												log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
-												error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
-												warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
-											},
-										}
-
-										// Execute JavaScript code directly (n8n already provides sandboxing)
-										const wrappedCode = `
-										(function() {
-											// Set up context variables
-											${Object.keys(context)
-												.map((key) => `var ${key} = arguments[0]["${key}"];`)
-												.join("\n\t\t\t\t\t\t\t")}
-											
-											// Execute user code
-											${code}
-										})
-									`
-
-										const result = eval(wrappedCode)(context)
-
-										logger.log("🌊 Function: Code execution result =", result)
-
-										// If code returns a value, merge it with locals
-										if (result !== undefined) {
-											if (typeof result === "object" && result !== null) {
-												// Merge locals (parameters) first, then returned object (returned object wins conflicts)
-												outputItem.json = {
-													...outputItem.json,
-													...result,
-												}
-											} else {
-												// For non-object returns, include the result
-												outputItem.json = {
-													...outputItem.json,
-													result,
-												}
-											}
-										}
-									} catch (error) {
-										logger.error("🌊 Function: Code execution error:", error)
-										outputItem.json = {
-											...outputItem.json,
-											_codeError: error.message,
-										}
-									}
-								}
-
-								logger.log("🌊 Function: Emitting output item:", outputItem)
-
-								// Emit the item to continue the workflow
-								this.emit([[outputItem]])
-
-								// Function execution complete - ReturnFromFunction node is responsible for sending response
-								logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
-								logger.log("🌊 Function: Response channel:", responseChannel)
-								logger.log("🌊 Function: Call ID:", callId)
-								logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
-							} catch (error) {
-								logger.error("🌊 Function: Error processing message:", error)
-
-								// Send error response
 								try {
+									logger.log("🌊 Function: Processing stream message:", message.id)
+
+									// Parse message fields
 									const callId = message.message.callId
+									const params = JSON.parse(message.message.params)
+									const inputItem = JSON.parse(message.message.inputItem)
 									const responseChannel = message.message.responseChannel
 
-									await registry.publishResponse(responseChannel, {
-										success: false,
-										error: error.message,
-										callId,
-										timestamp: Date.now(),
-									})
+									logger.log("🌊 Function: Call ID:", callId)
+									logger.log("🌊 Function: Parameters:", params)
 
-									// Acknowledge the message even on error to prevent reprocessing
-									await registry.acknowledgeCall(streamKey, groupName, message.id)
+									// Process parameters according to function definition
+									const locals: Record<string, any> = {}
 
-									logger.log("🔍 DIAGNOSTIC: Error occurred, sending error response")
-									logger.log("🔍 DIAGNOSTIC: This is the ONLY time Function sends responses!")
-								} catch (responseError) {
-									logger.error("🌊 Function: Error sending error response:", responseError)
+									for (const param of parameterList) {
+										const paramName = param.name
+										const paramType = param.type
+										const required = param.required
+										const defaultValue = param.defaultValue
+
+										let value = params[paramName]
+										logger.log("🌊 Function: Processing parameter", paramName, "=", value)
+
+										// Handle required parameters
+										if (required && (value === undefined || value === null)) {
+											throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+										}
+
+										// Use default value if not provided
+										if (value === undefined || value === null) {
+											if (defaultValue !== "") {
+												try {
+													// Try to parse default value based on type
+													switch (paramType) {
+														case "number":
+															value = Number(defaultValue)
+															break
+														case "boolean":
+															value = defaultValue.toLowerCase() === "true"
+															break
+														case "object":
+														case "array":
+															value = JSON.parse(defaultValue)
+															break
+														default:
+															value = defaultValue
+													}
+												} catch (error) {
+													value = defaultValue // Fall back to string if parsing fails
+												}
+											}
+										}
+
+										locals[paramName] = value
+									}
+
+									logger.log("🌊 Function: Final locals =", locals)
+
+									// Create the output item
+									let outputItem: INodeExecutionData = {
+										json: {
+											...inputItem.json,
+											...locals,
+											_functionCall: {
+												callId,
+												functionName,
+												timestamp: Date.now(),
+												// Embed call context for ReturnFromFunction
+												responseChannel,
+												messageId: message.id,
+												streamKey,
+												groupName,
+											},
+										},
+										index: 0,
+										binary: inputItem.binary,
+									}
+
+									// Execute user code if enabled
+									if (enableCode && code.trim()) {
+										logger.log("🌊 Function: Executing JavaScript code")
+
+										try {
+											// Execute JavaScript code with parameters as global variables
+											const context = {
+												...locals,
+												item: outputItem.json,
+												console: {
+													log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
+													error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
+													warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
+												},
+											}
+
+											// Execute JavaScript code directly (n8n already provides sandboxing)
+											const wrappedCode = `
+											(function() {
+												// Set up context variables
+												${Object.keys(context)
+													.map((key) => `var ${key} = arguments[0]["${key}"];`)
+													.join("\n\t\t\t\t\t\t\t")}
+												
+												// Execute user code
+												${code}
+											})
+										`
+
+											const result = eval(wrappedCode)(context)
+
+											logger.log("🌊 Function: Code execution result =", result)
+
+											// If code returns a value, merge it with locals
+											if (result !== undefined) {
+												if (typeof result === "object" && result !== null) {
+													// Merge locals (parameters) first, then returned object (returned object wins conflicts)
+													outputItem.json = {
+														...outputItem.json,
+														...result,
+													}
+												} else {
+													// For non-object returns, include the result
+													outputItem.json = {
+														...outputItem.json,
+														result,
+													}
+												}
+											}
+										} catch (error) {
+											logger.error("🌊 Function: Code execution error:", error)
+											outputItem.json = {
+												...outputItem.json,
+												_codeError: error.message,
+											}
+										}
+									}
+
+									logger.log("🌊 Function: Emitting output item:", outputItem)
+
+									// Emit the item to continue the workflow
+									this.emit([[outputItem]])
+
+									// Function execution complete - ReturnFromFunction node is responsible for sending response
+									logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
+									logger.log("🌊 Function: Response channel:", responseChannel)
+									logger.log("🌊 Function: Call ID:", callId)
+									logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
+								} catch (error) {
+									logger.error("🌊 Function: Error processing message:", error)
+
+									// Send error response
+									try {
+										const callId = message.message.callId
+										const responseChannel = message.message.responseChannel
+
+										await registry.publishResponse(responseChannel, {
+											success: false,
+											error: error.message,
+											callId,
+											timestamp: Date.now(),
+										})
+
+										// Acknowledge the message even on error to prevent reprocessing
+										await registry.acknowledgeCall(streamKey, groupName, message.id)
+
+										logger.log("🔍 DIAGNOSTIC: Error occurred, sending error response")
+										logger.log("🔍 DIAGNOSTIC: This is the ONLY time Function sends responses!")
+									} catch (responseError) {
+										logger.error("🌊 Function: Error sending error response:", responseError)
+									}
 								}
 							}
+						} catch (error) {
+							if (isActive) {
+								logger.error("🌊 Function: Error in instant consumer:", error)
+								// Brief pause before retrying to avoid tight error loops
+								await new Promise((resolve) => setTimeout(resolve, 100))
+							}
 						}
-					} catch (error) {
-						logger.error("🌊 Function: Error reading from stream:", error)
-						// Wait a bit before retrying
-						await new Promise((resolve) => setTimeout(resolve, 1000))
 					}
+				} catch (error) {
+					logger.error("🌊 Function: Fatal error setting up instant consumer:", error)
+				} finally {
+					// Clean up connections
+					if (controlSubscriber) {
+						try {
+							await controlSubscriber.disconnect()
+							logger.log("🚀 INSTANT: Control subscriber disconnected")
+						} catch (error) {
+							logger.error("🚀 INSTANT: Error disconnecting control subscriber:", error)
+						}
+					}
+					if (blockingConnection) {
+						try {
+							await blockingConnection.disconnect()
+							logger.log("🚀 INSTANT: Blocking connection disconnected")
+						} catch (error) {
+							logger.error("🚀 INSTANT: Error disconnecting blocking connection:", error)
+						}
+					}
+					logger.log("🚀 INSTANT: Consumer cleanup complete")
 				}
 
-				logger.log("🌊 Function: Consumer loop ended")
+				logger.log("🌊 Function: Instant consumer loop ended")
 			}
 
 			// Start the consumer loop
@@ -475,8 +518,16 @@ export class Function implements INodeType {
 					isActive = false
 					registry.stopConsumer(functionName, scope)
 
+					// Send stop signal to instant consumer
+					try {
+						await registry.sendStopSignal(controlChannel)
+						logger.log("🚀 INSTANT: Stop signal sent")
+					} catch (error) {
+						logger.error("🚀 INSTANT: Error sending stop signal:", error)
+					}
+
 					// Give consumer time to stop
-					await new Promise((resolve) => setTimeout(resolve, 100))
+					await new Promise((resolve) => setTimeout(resolve, 200))
 
 					// Stop heartbeat
 					registry.stopHeartbeat(functionName, scope)
