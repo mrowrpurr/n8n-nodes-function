@@ -224,16 +224,16 @@ export class Function implements INodeType {
 						await registry.unregisterFunction(functionName, scope)
 					},
 					manualTriggerFunction: async () => {
-						const triggerData: INodeExecutionData = {
-							json: {
-								functionName,
-								registered: true,
-								scope,
-								mode: "in-memory-fallback",
-								timestamp: new Date().toISOString(),
-							},
-						}
-						this.emit([[triggerData]])
+						throw new NodeOperationError(
+							this.getNode(),
+							`❌ Cannot execute Function node directly!\n\n` +
+								`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
+								`To use this function:\n` +
+								`1. Add a "Call Function" node to your workflow\n` +
+								`2. Configure it to call "${functionName}"\n` +
+								`3. Execute the workflow from the Call Function node instead\n\n` +
+								`Function nodes are triggers that wait for calls - they don't execute on their own.`
+						)
 					},
 				}
 			}
@@ -545,15 +545,16 @@ export class Function implements INodeType {
 				},
 				// Emit initial trigger data to activate the workflow
 				manualTriggerFunction: async () => {
-					const triggerData: INodeExecutionData = {
-						json: {
-							functionName,
-							registered: true,
-							scope,
-							timestamp: new Date().toISOString(),
-						},
-					}
-					this.emit([[triggerData]])
+					throw new NodeOperationError(
+						this.getNode(),
+						`❌ Cannot execute Function node directly!\n\n` +
+							`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
+							`To use this function:\n` +
+							`1. Add a "Call Function" node to your workflow\n` +
+							`2. Configure it to call "${functionName}"\n` +
+							`3. Execute the workflow from the Call Function node instead\n\n` +
+							`Function nodes are triggers that wait for calls - they don't execute on their own.`
+					)
 				},
 			}
 		} else {
@@ -726,15 +727,16 @@ export class Function implements INodeType {
 				},
 				// Emit initial trigger data to activate the workflow
 				manualTriggerFunction: async () => {
-					const triggerData: INodeExecutionData = {
-						json: {
-							functionName,
-							registered: true,
-							scope,
-							timestamp: new Date().toISOString(),
-						},
-					}
-					this.emit([[triggerData]])
+					throw new NodeOperationError(
+						this.getNode(),
+						`❌ Cannot execute Function node directly!\n\n` +
+							`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
+							`To use this function:\n` +
+							`1. Add a "Call Function" node to your workflow\n` +
+							`2. Configure it to call "${functionName}"\n` +
+							`3. Execute the workflow from the Call Function node instead\n\n` +
+							`Function nodes are triggers that wait for calls - they don't execute on their own.`
+					)
 				},
 			}
 		}
