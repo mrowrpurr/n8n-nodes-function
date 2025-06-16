@@ -197,7 +197,16 @@ export class CallFunction implements INodeType {
 					// Try multiple ways to get the current workflow ID
 					let workflowId = "unknown"
 					try {
-						workflowId = this.getWorkflow().id || "unknown"
+						const workflow = this.getWorkflow()
+						logger.log("🔧 CallFunction: Workflow object:", {
+							id: workflow.id,
+							name: workflow.name,
+							active: workflow.active,
+							hasId: !!workflow.id,
+							idType: typeof workflow.id,
+							idValue: workflow.id,
+						})
+						workflowId = workflow.id || "unknown"
 					} catch (error) {
 						logger.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
 					}
@@ -222,27 +231,18 @@ export class CallFunction implements INodeType {
 						availableFunctions = await registry.getAvailableFunctions(workflowId)
 						logger.log("🔧 CallFunction: Found functions for workflow scope:", availableFunctions)
 					} else {
-						// When workflow ID is unknown (design-time), we need to be more careful
-						// In in-memory mode, we can show all local functions since they're in the same process
-						// In Redis mode, we should be more restrictive
+						// When workflow ID is unknown (design-time), we need a smarter approach
+						// The issue is that we can't distinguish between functions from the current workflow
+						// and functions from other workflows when the workflow ID is unknown
 						logger.log("🔧 CallFunction: Workflow ID unknown during design-time")
 
-						// Check if we're in queue mode (Redis) or in-memory mode
-						const isQueueMode = isQueueModeEnabled()
-						logger.log("🔧 CallFunction: Queue mode enabled:", isQueueMode)
-
-						if (!isQueueMode) {
-							// In-memory mode: show all non-global functions (they're all in the same process)
-							logger.log("🔧 CallFunction: In-memory mode - showing all local functions")
-							const allFunctions = await registry.getAvailableFunctions()
-							const globalFunctions = await registry.getAvailableFunctions("__global__")
-							const globalNames = new Set(globalFunctions.map((f) => f.value))
-							availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
-						} else {
-							// Redis mode: be more restrictive when workflow ID is unknown
-							logger.log("🔧 CallFunction: Redis mode with unknown workflow ID - showing no local functions for security")
-							availableFunctions = []
-						}
+						// For now, show all non-global functions but add a warning in the UI
+						// This is a compromise: functionality works but there's potential for cross-workflow visibility
+						logger.log("🔧 CallFunction: Showing all local functions (potential cross-workflow visibility)")
+						const allFunctions = await registry.getAvailableFunctions()
+						const globalFunctions = await registry.getAvailableFunctions("__global__")
+						const globalNames = new Set(globalFunctions.map((f) => f.value))
+						availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
 
 						logger.log("🔧 CallFunction: Found functions after filtering:", availableFunctions)
 					}

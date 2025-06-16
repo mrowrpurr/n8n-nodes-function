@@ -955,6 +955,11 @@ class FunctionRegistry {
 			if (scope && listener.executionId !== scope) {
 				continue
 			}
+			// If no scope is specified, only include global functions
+			// This prevents local functions from leaking across workflows when scope is unknown
+			if (!scope && listener.executionId !== "__global__") {
+				continue
+			}
 			functionNames.add(listener.functionName)
 		}
 
@@ -989,7 +994,12 @@ class FunctionRegistry {
 										logger.error(`Error reading metadata for ${key}:`, metaError)
 									}
 								} else {
-									functionNames.add(functionName)
+									// If no scope is specified, only include global functions
+									// This prevents local functions from leaking across workflows when scope is unknown
+									const metadata = await this.client.hGetAll(key)
+									if (metadata && metadata.executionId === "__global__") {
+										functionNames.add(functionName)
+									}
 								}
 							}
 						}
