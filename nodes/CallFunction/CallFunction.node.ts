@@ -174,7 +174,7 @@ export class CallFunction implements INodeType {
 				logger.log("🔧 CallFunction: Global function mode:", globalFunction)
 
 				const registry = await getFunctionRegistry()
-				let availableFunctions
+				let availableFunctions: Array<{ name: string; value: string }>
 
 				if (globalFunction) {
 					// Only show global functions (scope = "__global__")
@@ -194,32 +194,57 @@ export class CallFunction implements INodeType {
 					// Show local functions - get functions for current workflow scope
 					logger.log("🔧 CallFunction: Getting functions for current workflow scope")
 
-					// Try to get the current workflow ID
+					// Try multiple ways to get the current workflow ID
 					let workflowId = "unknown"
 					try {
 						workflowId = this.getWorkflow().id || "unknown"
 					} catch (error) {
-						logger.log("🔧 CallFunction: Could not get workflow ID:", error.message)
+						logger.log("🔧 CallFunction: Could not get workflow ID from getWorkflow():", error.message)
 					}
 
-					logger.log("🔧 CallFunction: Current workflow ID:", workflowId)
+					// If still unknown, try to get from workflow static data
+					if (workflowId === "unknown") {
+						try {
+							const staticData = this.getWorkflowStaticData("global")
+							if (staticData && staticData.workflowId) {
+								workflowId = String(staticData.workflowId)
+								logger.log("🔧 CallFunction: Got workflow ID from static data:", workflowId)
+							}
+						} catch (error) {
+							logger.log("🔧 CallFunction: Could not get workflow ID from static data:", error.message)
+						}
+					}
+
+					logger.log("🔧 CallFunction: Final workflow ID:", workflowId)
 
 					if (workflowId !== "unknown") {
 						// Get functions specifically for this workflow
 						availableFunctions = await registry.getAvailableFunctions(workflowId)
 						logger.log("🔧 CallFunction: Found functions for workflow scope:", availableFunctions)
 					} else {
-						// Fallback: get all functions and filter out globals manually
-						logger.log("🔧 CallFunction: Workflow ID unknown, getting all functions and filtering")
-						const allFunctions = await registry.getAvailableFunctions()
+						// When workflow ID is unknown (design-time), we need to be more careful
+						// In in-memory mode, we can show all local functions since they're in the same process
+						// In Redis mode, we should be more restrictive
+						logger.log("🔧 CallFunction: Workflow ID unknown during design-time")
 
-						// Get actual global functions to filter them out
-						const globalFunctions = await registry.getAvailableFunctions("__global__")
-						const globalNames = new Set(globalFunctions.map((f) => f.value))
+						// Check if we're in queue mode (Redis) or in-memory mode
+						const isQueueMode = isQueueModeEnabled()
+						logger.log("🔧 CallFunction: Queue mode enabled:", isQueueMode)
 
-						// Filter to only show non-global functions
-						availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
-						logger.log("🔧 CallFunction: Found local functions after filtering:", availableFunctions)
+						if (!isQueueMode) {
+							// In-memory mode: show all non-global functions (they're all in the same process)
+							logger.log("🔧 CallFunction: In-memory mode - showing all local functions")
+							const allFunctions = await registry.getAvailableFunctions()
+							const globalFunctions = await registry.getAvailableFunctions("__global__")
+							const globalNames = new Set(globalFunctions.map((f) => f.value))
+							availableFunctions = allFunctions.filter((func) => !globalNames.has(func.value))
+						} else {
+							// Redis mode: be more restrictive when workflow ID is unknown
+							logger.log("🔧 CallFunction: Redis mode with unknown workflow ID - showing no local functions for security")
+							availableFunctions = []
+						}
+
+						logger.log("🔧 CallFunction: Found functions after filtering:", availableFunctions)
 					}
 
 					// If no local functions found, add a helpful message
@@ -284,11 +309,10 @@ export class CallFunction implements INodeType {
 					logger.log("🔧 CallFunction: Using workflow ID for parameters:", workflowId)
 					parameters = await registry.getFunctionParameters(functionName, workflowId)
 
-					// Fallback: if no parameters found with specific scope (e.g., workflowId is "unknown" during design-time)
-					// try to get parameters without scope filtering
+					// No fallback for unknown workflow ID - this prevents parameter leakage from other workflows
 					if (parameters.length === 0 && (workflowId === "unknown" || workflowId === "")) {
-						logger.log("🔧 CallFunction: No parameters found with scope, trying fallback without scope")
-						parameters = await registry.getFunctionParameters(functionName)
+						logger.log("🔧 CallFunction: No parameters found with unknown workflow ID - this is expected during design-time")
+						// Don't try fallback without scope as this would show parameters from functions in other workflows
 					}
 				}
 
