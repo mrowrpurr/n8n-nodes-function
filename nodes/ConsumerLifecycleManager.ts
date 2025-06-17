@@ -65,6 +65,9 @@ export class ConsumerLifecycleManager {
 			// Initialize state manager
 			await this.stateManager.initialize()
 
+			// CRITICAL: Create stream and consumer group BEFORE starting consumer
+			await this.ensureStreamAndGroupExist()
+
 			// Register consumer in state management
 			await this.registerConsumer()
 
@@ -139,6 +142,52 @@ export class ConsumerLifecycleManager {
 		this.client = createClient(clientConfig)
 		await this.client.connect()
 		logger.log("🔄 LIFECYCLE: ✅ Redis client connected")
+	}
+
+	/**
+	 * Ensure Redis stream and consumer group exist before starting consumer
+	 */
+	private async ensureStreamAndGroupExist(): Promise<void> {
+		if (!this.client) {
+			throw new Error("Redis client not initialized")
+		}
+
+		try {
+			logger.log("🔄 LIFECYCLE: Ensuring stream and group exist...")
+			logger.log("🔄 LIFECYCLE: Stream key:", this.config.streamKey)
+			logger.log("🔄 LIFECYCLE: Group name:", this.config.groupName)
+
+			// First, create the stream by adding a dummy message if it doesn't exist
+			try {
+				await this.client.xAdd(this.config.streamKey, "*", {
+					init: "stream_initialization",
+					timestamp: Date.now().toString(),
+				})
+				logger.log("🔄 LIFECYCLE: ✅ Stream created/exists:", this.config.streamKey)
+			} catch (error) {
+				logger.log("🔄 LIFECYCLE: Stream creation error (may already exist):", error.message)
+			}
+
+			// Create the consumer group
+			try {
+				await this.client.xGroupCreate(this.config.streamKey, this.config.groupName, "0", {
+					MKSTREAM: true,
+				})
+				logger.log("🔄 LIFECYCLE: ✅ Consumer group created:", this.config.groupName)
+			} catch (error) {
+				if (error.message.includes("BUSYGROUP")) {
+					logger.log("🔄 LIFECYCLE: ✅ Consumer group already exists:", this.config.groupName)
+				} else {
+					logger.error("🔄 LIFECYCLE: ❌ Error creating consumer group:", error)
+					throw error
+				}
+			}
+
+			logger.log("🔄 LIFECYCLE: ✅ Stream and group setup completed")
+		} catch (error) {
+			logger.error("🔄 LIFECYCLE: ❌ Failed to ensure stream and group exist:", error)
+			throw error
+		}
 	}
 
 	/**
@@ -326,7 +375,7 @@ export class ConsumerLifecycleManager {
 			// Disconnect state manager
 			await this.stateManager.disconnect()
 
-			// Disconnect Redis client
+			// Disconnect Redis client (our own client, not the shared connection manager)
 			if (this.client) {
 				await this.client.disconnect()
 				this.client = null

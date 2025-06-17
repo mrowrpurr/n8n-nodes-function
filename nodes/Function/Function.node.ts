@@ -1,7 +1,7 @@
 import { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription, ITriggerFunctions, ITriggerResponse, NodeOperationError, NodeConnectionType } from "n8n-workflow"
 
 import { functionRegistryLogger as logger } from "../Logger"
-import { isQueueModeEnabled, getRedisConfig } from "../FunctionRegistryFactory"
+import { isQueueModeEnabled, getRedisConfig, getFunctionRegistry } from "../FunctionRegistryFactory"
 import { ConsumerLifecycleManager, ConsumerConfig } from "../ConsumerLifecycleManager"
 import { RedisConnectionManager } from "../RedisConnectionManager"
 
@@ -10,7 +10,7 @@ export class Function implements INodeType {
 		displayName: "Function",
 		name: "function",
 		icon: "fa:code",
-		group: ["transform"],
+		group: ["trigger"],
 		version: 1,
 		description: "Define a function that can be called by CallFunction nodes",
 		defaults: {
@@ -19,6 +19,14 @@ export class Function implements INodeType {
 		inputs: [],
 		outputs: [NodeConnectionType.Main],
 		credentials: [],
+		triggerPanel: {
+			header: "",
+			executionsHelp: {
+				inactive: "Function nodes are activated automatically when the workflow is active and will process calls from CallFunction nodes.",
+				active: "Function node is active and ready to process calls from CallFunction nodes.",
+			},
+			activationHint: "Once you save the workflow, this Function node will be activated and ready to process calls.",
+		},
 		properties: [
 			{
 				displayName: "Function Name",
@@ -82,7 +90,6 @@ return {
 		}
 
 		let lifecycleManager: ConsumerLifecycleManager | null = null
-		let connectionManager: RedisConnectionManager | null = null
 
 		try {
 			// Get Redis configuration
@@ -91,8 +98,8 @@ return {
 				throw new NodeOperationError(this.getNode(), "Redis configuration not available")
 			}
 
-			// Initialize connection manager
-			connectionManager = RedisConnectionManager.getInstance(redisConfig)
+			// Initialize connection manager (singleton, shared across nodes)
+			RedisConnectionManager.getInstance(redisConfig)
 
 			// Create consumer configuration
 			const consumerConfig: ConsumerConfig = {
@@ -108,6 +115,18 @@ return {
 			const messageHandler = async (messageData: any) => {
 				return await processMessage(messageData, code)
 			}
+
+			// Register function in registry so CallFunction can find it
+			const registry = await getFunctionRegistry()
+			await registry.registerFunction({
+				name: functionName,
+				scope: scope,
+				code: code,
+				parameters: [], // TODO: Extract parameters from code if needed
+				workflowId: this.getWorkflow().id || "unknown",
+				nodeId: this.getNode().id,
+			})
+			logger.log("🚀 FUNCTION: ✅ Function registered in registry")
 
 			// Create and start lifecycle manager
 			lifecycleManager = new ConsumerLifecycleManager(consumerConfig, redisConfig, messageHandler)
@@ -126,10 +145,8 @@ return {
 							await lifecycleManager.stop()
 						}
 
-						if (connectionManager) {
-							await connectionManager.shutdown()
-						}
-
+						// DON'T shutdown the connection manager here - it's shared!
+						// The connection manager is a singleton and may be used by other nodes
 						logger.log("🚀 FUNCTION: ✅ Function node closed successfully")
 					} catch (error) {
 						logger.error("🚀 FUNCTION: ❌ Error closing Function node:", error)
@@ -144,9 +161,7 @@ return {
 				if (lifecycleManager) {
 					await lifecycleManager.stop()
 				}
-				if (connectionManager) {
-					await connectionManager.shutdown()
-				}
+				// DON'T shutdown connection manager on error - it's shared!
 			} catch (cleanupError) {
 				logger.error("🚀 FUNCTION: ❌ Error during cleanup:", cleanupError)
 			}
