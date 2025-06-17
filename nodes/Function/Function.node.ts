@@ -87,9 +87,8 @@ export class Function implements INodeType {
 			}
 
 			// Create message handler
-			const emitFunction = this.emit.bind(this)
 			const messageHandler = async (messageData: any) => {
-				return await processMessage(messageData, emitFunction)
+				return await processMessage(messageData, this.emit.bind(this))
 			}
 
 			// Register function in registry so CallFunction can find it
@@ -192,13 +191,28 @@ export class Function implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		// This should not be called for trigger nodes
-		throw new NodeOperationError(this.getNode(), "Function node should be used as a trigger, not executed directly")
+		// Function nodes are triggers, but n8n may try to execute them during workflow execution
+		// When this happens, we should just pass through the input data or return empty data
+
+		logger.log("🚀 FUNCTION: Execute method called (likely during workflow execution)")
+
+		// Get input data if any
+		const inputData = this.getInputData()
+
+		if (inputData && inputData.length > 0) {
+			// Pass through input data unchanged
+			logger.log("🚀 FUNCTION: Passing through input data during workflow execution")
+			return [inputData]
+		} else {
+			// Return empty data to avoid breaking the workflow
+			logger.log("🚀 FUNCTION: Returning empty data during workflow execution")
+			return [[]]
+		}
 	}
 }
 
 /**
- * Process a message from the Redis stream by triggering workflow execution
+ * Process a message from the Redis stream by emitting data to connected nodes
  */
 async function processMessage(messageData: any, emitFunction: (data: INodeExecutionData[][]) => void): Promise<any> {
 	const startTime = Date.now()
@@ -213,7 +227,7 @@ async function processMessage(messageData: any, emitFunction: (data: INodeExecut
 		}
 
 		// Parse message data
-		const { input, callId, item } = messageData
+		const { input, callId, item, responseChannel } = messageData
 
 		if (!callId) {
 			throw new NodeOperationError(null as any, "Message missing callId")
@@ -235,30 +249,31 @@ async function processMessage(messageData: any, emitFunction: (data: INodeExecut
 			throw new NodeOperationError(null as any, `Failed to parse item data: ${error}`)
 		}
 
-		// Create execution data with function call metadata
-		const executionData: INodeExecutionData[] = [
-			{
-				json: {
-					...parsedInput,
-					_functionCall: {
-						callId,
-						functionName: messageData.functionName,
-						timestamp: Date.now(),
-					},
+		// Create output item with function call metadata
+		const outputItem: INodeExecutionData = {
+			json: {
+				...parsedInput,
+				_functionCall: {
+					callId,
+					functionName: messageData.functionName,
+					responseChannel,
+					timestamp: Date.now(),
 				},
-				pairedItem: parsedItem.pairedItem,
 			},
-		]
+			pairedItem: parsedItem.pairedItem,
+		}
 
-		// Trigger workflow execution
-		logger.log("🚀 FUNCTION: Triggering workflow execution with callId:", callId)
-		emitFunction([executionData])
+		// Emit data to connected nodes (this is how trigger nodes work)
+		logger.log("🚀 FUNCTION: Emitting data to connected nodes with callId:", callId)
+		emitFunction([[outputItem]])
 
 		const processingTime = Date.now() - startTime
-		logger.log("🚀 FUNCTION: ✅ Workflow triggered successfully in", processingTime, "ms")
+		logger.log("🚀 FUNCTION: ✅ Data emitted to workflow in", processingTime, "ms")
+		logger.log("🚀 FUNCTION: ReturnFromFunction node must send response or call will hang forever")
 
-		// Note: The actual result will be sent by ReturnFromFunction node
-		return { triggered: true, callId }
+		// Note: ReturnFromFunction node MUST send the response back
+		// If no ReturnFromFunction is used, the call will hang forever (by design)
+		return outputItem.json
 	} catch (error) {
 		const processingTime = Date.now() - startTime
 		logger.error("🚀 FUNCTION: ❌ Error processing message:", error, "in", processingTime, "ms")
