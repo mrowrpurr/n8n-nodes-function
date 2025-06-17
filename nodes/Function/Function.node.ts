@@ -446,6 +446,9 @@ export class Function implements INodeType {
 									logger.log("🌊 Function: Response channel:", responseChannel)
 									logger.log("🌊 Function: Call ID:", callId)
 									logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
+
+									// Don't acknowledge the message here - ReturnFromFunction will do it
+									// The consumer loop will continue to handle more function calls
 								} catch (error) {
 									logger.error("🌊 Function: Error processing message:", error)
 
@@ -542,8 +545,8 @@ export class Function implements INodeType {
 					// Unregister function
 					await registry.unregisterFunction(functionName, scope)
 
-					// Clean up stream
-					await registry.cleanupStream(streamKey, groupName)
+					// Don't clean up the stream - it should persist for multiple function calls
+					// The stream will be cleaned up when the workflow is deactivated or n8n shuts down
 
 					logger.log("🌊 Function: Cleanup complete")
 				},
