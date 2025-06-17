@@ -136,7 +136,8 @@ export class Function implements INodeType {
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		logger.info("Starting stream-based trigger setup")
+		logger.info("🔄 RESTART: Starting stream-based trigger setup")
+		logger.info("🔄 RESTART: Function node is being activated/reactivated")
 
 		// Get function configuration
 		const functionName = this.getNode().name
@@ -242,7 +243,8 @@ export class Function implements INodeType {
 			const controlChannel = `control:stop:${functionName}:${scope}:${consumerName}`
 
 			const processStreamMessages = async () => {
-				logger.log("🚀 INSTANT: Starting instant-response consumer with dedicated connection")
+				logger.log("🔄 RESTART: processStreamMessages() function called - consumer is starting!")
+				logger.log("� INSTANT: Starting instant-response consumer with dedicated connection")
 				logger.log("🚀 INSTANT: Stream key:", streamKey)
 				logger.log("🚀 INSTANT: Group name:", groupName)
 				logger.log("🚀 INSTANT: Consumer name:", consumerName)
@@ -520,6 +522,7 @@ export class Function implements INodeType {
 			}
 
 			// Start the consumer loop
+			logger.info("🔄 RESTART: About to start processStreamMessages() async function")
 			processStreamMessages().catch((error) => {
 				logger.error("🌊 Function: Fatal error in stream consumer:", error)
 			})
@@ -528,7 +531,7 @@ export class Function implements INodeType {
 			logger.log("🔍 DIAGNOSTIC: Consumer might not be ready immediately!")
 			logger.log("🔍 DIAGNOSTIC: This could cause first calls to fail")
 
-			logger.info("Function registered successfully, starting stream consumer")
+			logger.info("🔄 RESTART: Function registered successfully, stream consumer should be starting")
 
 			// Return trigger response with cleanup for queue mode
 			return {
