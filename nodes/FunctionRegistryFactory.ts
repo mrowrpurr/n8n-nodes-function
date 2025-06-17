@@ -18,10 +18,6 @@ let queueModeEnabled: boolean = false
 export function setRedisConfig(config: RedisConfig): void {
 	logger.info("Setting Redis config override:", config)
 	redisConfigOverride = config
-
-	// Update existing registry instance if it exists
-	const registry = FunctionRegistry.getInstance()
-	registry.setRedisConfig(config)
 }
 
 export function setRedisHost(host: string): void {
@@ -38,10 +34,6 @@ export function setRedisHost(host: string): void {
 	} else {
 		redisConfigOverride.host = host
 	}
-
-	// Update existing registry instance if it exists
-	const registry = FunctionRegistry.getInstance()
-	registry.setRedisConfig(redisConfigOverride)
 }
 
 export function setQueueMode(enabled: boolean): void {
@@ -56,10 +48,7 @@ export function getRedisHost(): string {
 	return redisConfigOverride.host
 }
 
-export function getRedisConfig(): RedisConfig {
-	if (!redisConfigOverride) {
-		throw new Error("Redis configuration not set. Please configure Redis credentials.")
-	}
+export function getRedisConfig(): RedisConfig | null {
 	return redisConfigOverride
 }
 
@@ -67,23 +56,25 @@ export function isQueueModeEnabled(): boolean {
 	return queueModeEnabled
 }
 
-export function getFunctionRegistry(): FunctionRegistry {
+export async function getFunctionRegistry(): Promise<FunctionRegistry> {
 	logger.debug("Queue mode enabled =", queueModeEnabled)
 
-	const registry = FunctionRegistry.getInstance()
-
-	if (queueModeEnabled) {
+	if (queueModeEnabled && redisConfigOverride) {
 		logger.debug("Using Redis-backed FunctionRegistry")
-
-		// Apply Redis config override if set
-		if (redisConfigOverride) {
-			registry.setRedisConfig(redisConfigOverride)
-		}
+		return FunctionRegistry.getInstance(redisConfigOverride)
 	} else {
 		logger.debug("Using in-memory FunctionRegistry (Redis disabled)")
+		// For non-queue mode, we still need a registry but it won't use Redis
+		const dummyConfig: RedisConfig = {
+			host: "localhost",
+			port: 6379,
+			database: 0,
+			user: "",
+			password: "",
+			ssl: false,
+		}
+		return FunctionRegistry.getInstance(dummyConfig)
 	}
-
-	return registry
 }
 
 // Auto-bootstrap from queue-mode environment variables if present

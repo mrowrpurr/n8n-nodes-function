@@ -1,960 +1,281 @@
-import {
-	type INodeExecutionData,
-	NodeConnectionType,
-	type INodeType,
-	type INodeTypeDescription,
-	NodeOperationError,
-	type ITriggerFunctions,
-	type ITriggerResponse,
-} from "n8n-workflow"
-import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
-import { type ParameterDefinition } from "../FunctionRegistry"
-import { functionNodeLogger as logger } from "../Logger"
+import { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription, ITriggerFunctions, ITriggerResponse, NodeOperationError, NodeConnectionType } from "n8n-workflow"
+
+import { functionRegistryLogger as logger } from "../Logger"
+import { isQueueModeEnabled, getRedisConfig } from "../FunctionRegistryFactory"
+import { ConsumerLifecycleManager, ConsumerConfig } from "../ConsumerLifecycleManager"
+import { RedisConnectionManager } from "../RedisConnectionManager"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: "Function",
 		name: "function",
 		icon: "fa:code",
-		group: ["trigger"],
+		group: ["transform"],
 		version: 1,
-		description: "Define a callable function within the current workflow",
-		subtitle: "={{$node.name}}",
+		description: "Define a function that can be called by CallFunction nodes",
 		defaults: {
 			name: "Function",
-			color: "#4a90e2",
 		},
 		inputs: [],
 		outputs: [NodeConnectionType.Main],
+		credentials: [],
 		properties: [
 			{
-				displayName: "Function Parameters",
-				name: "parameters",
-				placeholder: "Add parameter",
-				type: "fixedCollection",
-				description: "Define the parameters this function accepts",
-				typeOptions: {
-					multipleValues: true,
-					sortable: true,
-				},
-				default: {},
-				options: [
-					{
-						name: "parameter",
-						displayName: "Parameter",
-						values: [
-							{
-								displayName: "Default Value",
-								name: "defaultValue",
-								type: "string",
-								default: "",
-								description: "Default value if parameter is not provided",
-							},
-							{
-								displayName: "Description",
-								name: "description",
-								type: "string",
-								default: "",
-								description: "Description of what this parameter is for",
-							},
-							{
-								displayName: "Parameter Name",
-								name: "name",
-								type: "string",
-								default: "",
-								placeholder: "parameterName",
-								description: "Name of the parameter",
-								required: true,
-							},
-							{
-								displayName: "Required",
-								name: "required",
-								type: "boolean",
-								default: false,
-								description: "Whether this parameter is required",
-							},
-							{
-								displayName: "Type",
-								name: "type",
-								type: "options",
-								options: [
-									{
-										name: "Array",
-										value: "array",
-									},
-									{
-										name: "Boolean",
-										value: "boolean",
-									},
-									{
-										name: "Number",
-										value: "number",
-									},
-									{
-										name: "Object",
-										value: "object",
-									},
-									{
-										name: "String",
-										value: "string",
-									},
-								],
-								default: "string",
-								description: "Expected type of the parameter",
-								required: true,
-							},
-						],
-					},
-				],
+				displayName: "Function Name",
+				name: "functionName",
+				type: "string",
+				default: "",
+				placeholder: "myFunction",
+				description: "The name of the function",
+				required: true,
 			},
 			{
-				displayName: "Enable Code Execution",
-				name: "enableCode",
-				type: "boolean",
-				default: false,
-				description: "Whether to enable optional JavaScript code execution with parameters available as global variables",
+				displayName: "Scope",
+				name: "scope",
+				type: "string",
+				default: "global",
+				description: "The scope of the function (e.g., global, user, workflow)",
 			},
 			{
 				displayName: "Code",
-				name: "jsCode",
+				name: "code",
 				type: "string",
 				typeOptions: {
-					editor: "jsEditor",
-					rows: 15,
+					editor: "codeNodeEditor",
+					editorLanguage: "javaScript",
 				},
-				default:
-					"// Parameters are available as global variables\n// Example: if you have a 'name' parameter, use it directly\n// logger.log('Hello', name);\n\n// Process your parameters, call APIs, do calculations, etc.\n// const result = someCalculation(param1, param2);\n// logger.log('Processed:', result);\n\n// Optionally return an object to add fields to the flowing item:\n// return { calculatedValue: result, timestamp: Date.now() };\n\n// To return from the function, use a 'Return from Function' node",
-				description:
-					"JavaScript code to execute within the function. Parameters are available as global variables. Returned objects add fields to the item flowing through the function.",
-				displayOptions: {
-					show: {
-						enableCode: [true],
-					},
-				},
+				default: `// Function code here
+// Input data is available as 'input'
+// Return the result
+
+return {
+	message: "Hello from function!",
+	input: input
+};`,
+				description: "The JavaScript code to execute",
+				noDataExpression: true,
 			},
 		],
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		logger.info("🔄 RESTART: Starting stream-based trigger setup")
-		logger.info("🔄 RESTART: Function node is being activated/reactivated")
-
-		// Get function configuration
-		const functionName = this.getNode().name
-		const parameters = this.getNodeParameter("parameters", 0, {}) as any
-		const parameterList = parameters.parameter || []
-		const enableCode = this.getNodeParameter("enableCode", 0) as boolean
-		const code = enableCode ? (this.getNodeParameter("jsCode", 0) as string) : ""
-
-		// Get execution and node IDs for context tracking
-		// const executionId = this.getExecutionId() // Not needed for stream-based approach
-		const nodeId = this.getNode().id
-		const workflowId = this.getWorkflow().id || "unknown"
-
-		// Determine scope for stream registration - always use workflow ID
-		const scope = workflowId
-
-		logger.info("Registering function:", functionName, "with scope:", scope)
-		logger.debug("Workflow ID:", workflowId)
-		logger.debug("Parameter list:", parameterList)
-
-		// Get the registry - Redis configuration comes from bootstrap
-		const registry = getFunctionRegistry()
-
-		// Convert parameter list to ParameterDefinition format
-		const parameterDefinitions: ParameterDefinition[] = parameterList.map((param: any) => ({
-			name: param.name,
-			type: param.type,
-			required: param.required,
-			defaultValue: param.defaultValue,
-			description: param.description,
-		}))
-
-		// Check if queue mode is enabled for Redis operations
-		const useRedisStreams = isQueueModeEnabled()
-
-		if (useRedisStreams) {
-			logger.debug("Queue mode enabled, setting up Redis streams")
-
-			// Declare variables outside try block for proper scope
-			let streamKey: string
-			let groupName: string
-			let consumerName: string
-
-			try {
-				// Create stream and register function metadata
-				streamKey = await registry.createStream(functionName, scope)
-				groupName = `group:${functionName}`
-				consumerName = `consumer-${Date.now()}-${Math.random().toString(36).slice(2)}`
-
-				// Store function metadata in Redis (force Redis storage since we're using streams)
-				await registry.registerFunction(functionName, scope, nodeId, parameterDefinitions, async () => [], true)
-
-				// Start heartbeat
-				registry.startHeartbeat(functionName, scope)
-
-				logger.debug("Stream created and function registered, starting consumer loop")
-			} catch (error) {
-				logger.error("Failed to set up Redis streams during activation:", error.message)
-				logger.info("Function will fall back to in-memory mode")
-				// Fall back to in-memory mode
-				await registry.registerFunction(
-					functionName,
-					scope,
-					nodeId,
-					parameterDefinitions,
-					async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
-						logger.log("🌊 Function: In-memory fallback function called:", functionName, "with parameters:", parameters)
-						return [inputItem]
-					},
-					false
-				)
-
-				return {
-					closeFunction: async () => {
-						logger.log("🌊 Function: Trigger closing, cleaning up in-memory fallback function")
-						await registry.unregisterFunction(functionName, scope)
-					},
-					manualTriggerFunction: async () => {
-						throw new NodeOperationError(
-							this.getNode(),
-							`❌ Cannot execute Function node directly!\n\n` +
-								`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
-								`To use this function:\n` +
-								`1. Add a "Call Function" node to your workflow\n` +
-								`2. Configure it to call "${functionName}"\n` +
-								`3. Execute the workflow from the Call Function node instead\n\n` +
-								`Function nodes are triggers that wait for calls - they don't execute on their own.`
-						)
-					},
-				}
-			}
-
-			// Check if there's already an active consumer for this function
-			if (registry.isConsumerActive(functionName, scope)) {
-				logger.log("🔍 DIAGNOSTIC: Found existing consumer for this function, stopping it first")
-				registry.stopConsumer(functionName, scope)
-				// Give it a moment to stop
-				await new Promise((resolve) => setTimeout(resolve, 100))
-			}
-
-			// Start the instant-response stream consumer with dedicated connection
-			let isActive = true
-			const controlChannel = `control:stop:${functionName}:${scope}:${consumerName}`
-			let recoveryCheckInterval: any = null
-
-			const processStreamMessages = async () => {
-				logger.log("🔄 RESTART: processStreamMessages() function called - consumer is starting!")
-				logger.log("� INSTANT: Starting instant-response consumer with dedicated connection")
-				logger.log("🚀 INSTANT: Stream key:", streamKey)
-				logger.log("🚀 INSTANT: Group name:", groupName)
-				logger.log("🚀 INSTANT: Consumer name:", consumerName)
-				logger.log("🚀 INSTANT: Control channel:", controlChannel)
-
-				// Create dedicated blocking connection for instant response
-				let blockingConnection = null
-				let controlSubscriber = null
-
-				try {
-					// Set up dedicated blocking connection
-					blockingConnection = await registry.createDedicatedBlockingConnection()
-					logger.log("🚀 INSTANT: Dedicated blocking connection created")
-
-					// Set up control subscriber for graceful shutdown
-					controlSubscriber = await registry.createControlSubscriber(controlChannel, () => {
-						logger.log("🚀 INSTANT: Received stop signal, ending consumer")
-						logger.log("🚀 INSTANT: Control channel:", controlChannel)
-						logger.log("🚀 INSTANT: This will cause the consumer loop to exit")
-						isActive = false
-					})
-					logger.log("🚀 INSTANT: Control subscriber ready for channel:", controlChannel)
-
-					// Wait for stream to be available before starting consumer loop
-					logger.log("🚀 INSTANT: Waiting for stream to be available...")
-					const streamAvailable = await registry.waitForStreamAvailable(streamKey, groupName, 10000) // 10 second timeout
-					if (!streamAvailable) {
-						logger.warn("🚀 INSTANT: Stream not available after timeout, proceeding anyway (will handle NOGROUP errors)")
-					} else {
-						logger.log("🚀 INSTANT: Stream is available, starting consumer loop")
-					}
-
-					// Clear any pending messages from previous failed executions
-					// This prevents processing orphaned messages when the workflow restarts
-					logger.log("🚀 INSTANT: Clearing any orphaned pending messages...")
-					await registry.clearPendingMessages(streamKey, groupName)
-
-					// Add a small delay to ensure the consumer is fully initialized
-					// This prevents race conditions when the function is edited and restarted
-					await new Promise((resolve) => setTimeout(resolve, 500))
-					logger.log("🚀 INSTANT: Consumer initialization delay complete")
-
-					// Register this consumer as active now that it's fully ready
-					registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
-					logger.log("🚀 INSTANT: Consumer registered as active")
-
-					// Set up a recovery check interval to detect if this consumer becomes inactive
-					recoveryCheckInterval = setInterval(async () => {
-						try {
-							if (!isActive || !registry.isConsumerActive(functionName, scope)) {
-								logger.log("🔍 RECOVERY: Consumer is no longer active, clearing recovery check")
-								if (recoveryCheckInterval) {
-									clearInterval(recoveryCheckInterval)
-									recoveryCheckInterval = null
-								}
-								return
-							}
-
-							// Check if there are any pending messages that haven't been processed
-							// This could indicate the consumer is stuck or not processing messages
-							const recoveryCheck = await registry.detectMissingConsumer(functionName, scope)
-							if (recoveryCheck.needsRecovery) {
-								logger.warn(`🚨 RECOVERY: Function consumer may be stuck - ${recoveryCheck.reason}`)
-								// Don't attempt recovery here as it could interfere with the running consumer
-								// Just log the issue for debugging
-							}
-						} catch (error) {
-							logger.error("🔍 RECOVERY: Error during recovery check:", error)
-						}
-					}, 30000) // Check every 30 seconds
-
-					logger.log("🔍 RECOVERY: Recovery check interval started")
-
-					// Main consumer loop with instant response
-					logger.log("🚀 INSTANT: Starting main consumer loop")
-					while (isActive && registry.isConsumerActive(functionName, scope)) {
-						try {
-							logger.log("🚀 INSTANT: About to call readCallsInstant with BLOCK 0...")
-							logger.log("🚀 INSTANT: Loop iteration - isActive:", isActive, "consumerActive:", registry.isConsumerActive(functionName, scope))
-
-							// Read messages with INFINITE blocking (BLOCK 0) for instant response
-							const messages = await registry.readCallsInstant(blockingConnection, streamKey, groupName, consumerName)
-							logger.log("🚀 INSTANT: readCallsInstant returned with", messages.length, "messages")
-
-							// Check if we should stop after reading messages
-							if (!isActive) {
-								logger.log("🚀 INSTANT: isActive is false, breaking from consumer loop")
-								break
-							}
-
-							if (!registry.isConsumerActive(functionName, scope)) {
-								logger.log("🚀 INSTANT: Consumer is no longer active, breaking from consumer loop")
-								break
-							}
-
-							if (messages.length > 0) {
-								logger.log("🚀 INSTANT: Message received INSTANTLY!")
-								logger.log("🚀 INSTANT: Processing", messages.length, "messages")
-							} else {
-								logger.log("🚀 INSTANT: No messages received, continuing loop...")
-								// If no messages, add a small delay to prevent tight loops
-								// This can happen during stream recreation or when there are simply no messages
-								await new Promise((resolve) => setTimeout(resolve, 100))
-								logger.log("🚀 INSTANT: Delay complete, continuing to next iteration")
-								continue // Explicitly continue to next iteration
-							}
-
-							for (const message of messages) {
-								if (!isActive) {
-									logger.log("🌊 Function: Consumer is inactive, breaking from message processing")
-									break
-								}
-
-								logger.log("🌊 Function: ===== STARTING MESSAGE PROCESSING =====")
-								logger.log("🌊 Function: Processing stream message:", message.id)
-								logger.log("🌊 Function: Raw message object:", JSON.stringify(message, null, 2))
-
-								// Wrap entire message processing in comprehensive error handling
-								try {
-									logger.log("🌊 Function: Entering main message processing try block...")
-									// Parse message fields with individual error handling
-									logger.log("🌊 Function: Parsing message fields...")
-
-									let callId, params, inputItem, responseChannel
-
-									try {
-										callId = message.message.callId
-										logger.log("🌊 Function: ✅ Call ID extracted:", callId)
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error extracting callId:", error)
-										throw new NodeOperationError(this.getNode(), `Failed to extract callId: ${error.message}`)
-									}
-
-									try {
-										responseChannel = message.message.responseChannel
-										logger.log("🌊 Function: ✅ Response channel extracted:", responseChannel)
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error extracting responseChannel:", error)
-										throw new NodeOperationError(this.getNode(), `Failed to extract responseChannel: ${error.message}`)
-									}
-
-									try {
-										logger.log("🌊 Function: Parsing params JSON:", message.message.params)
-										params = JSON.parse(message.message.params)
-										logger.log("🌊 Function: ✅ Parameters parsed:", params)
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error parsing params JSON:", error)
-										logger.error("🌊 Function: Raw params string:", message.message.params)
-										throw new NodeOperationError(this.getNode(), `Failed to parse params JSON: ${error.message}`)
-									}
-
-									try {
-										logger.log("🌊 Function: Parsing inputItem JSON:", message.message.inputItem)
-										inputItem = JSON.parse(message.message.inputItem)
-										logger.log("🌊 Function: ✅ Input item parsed:", inputItem)
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error parsing inputItem JSON:", error)
-										logger.error("🌊 Function: Raw inputItem string:", message.message.inputItem)
-										throw new NodeOperationError(this.getNode(), `Failed to parse inputItem JSON: ${error.message}`)
-									}
-
-									logger.log("🌊 Function: ✅ All message fields parsed successfully")
-									logger.log("🌊 Function: Call ID:", callId)
-									logger.log("🌊 Function: Parameters:", params)
-									logger.log("🌊 Function: Input item:", inputItem)
-									logger.log("🌊 Function: Response channel:", responseChannel)
-
-									// Process parameters according to function definition
-									logger.log("🌊 Function: Starting parameter processing...")
-									logger.log("🌊 Function: Parameter list:", parameterList)
-
-									const locals: Record<string, any> = {}
-
-									try {
-										for (const param of parameterList) {
-											logger.log("🌊 Function: Processing parameter definition:", param)
-
-											const paramName = param.name
-											const paramType = param.type
-											const required = param.required
-											const defaultValue = param.defaultValue
-
-											let value = params[paramName]
-											logger.log("🌊 Function: Processing parameter", paramName, "=", value, "type:", paramType, "required:", required)
-
-											// Handle required parameters
-											if (required && (value === undefined || value === null)) {
-												logger.error("🌊 Function: ❌ Required parameter missing:", paramName)
-												throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-											}
-
-											// Use default value if not provided
-											if (value === undefined || value === null) {
-												if (defaultValue !== "") {
-													logger.log("🌊 Function: Using default value for", paramName, ":", defaultValue)
-													try {
-														// Try to parse default value based on type
-														switch (paramType) {
-															case "number":
-																value = Number(defaultValue)
-																logger.log("🌊 Function: ✅ Parsed number default:", value)
-																break
-															case "boolean":
-																value = defaultValue.toLowerCase() === "true"
-																logger.log("🌊 Function: ✅ Parsed boolean default:", value)
-																break
-															case "object":
-															case "array":
-																value = JSON.parse(defaultValue)
-																logger.log("🌊 Function: ✅ Parsed object/array default:", value)
-																break
-															default:
-																value = defaultValue
-																logger.log("🌊 Function: ✅ Using string default:", value)
-														}
-													} catch (error) {
-														logger.warn("🌊 Function: ⚠️ Failed to parse default value, using as string:", error.message)
-														value = defaultValue // Fall back to string if parsing fails
-													}
-												} else {
-													logger.log("🌊 Function: No default value for", paramName, ", using undefined")
-												}
-											}
-
-											locals[paramName] = value
-											logger.log("🌊 Function: ✅ Parameter", paramName, "processed, final value:", value)
-										}
-
-										logger.log("🌊 Function: ✅ All parameters processed successfully")
-										logger.log("🌊 Function: Final locals =", locals)
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error during parameter processing:", error)
-										throw error // Re-throw to be caught by outer error handler
-									}
-
-									// Create the output item
-									logger.log("🌊 Function: Creating output item...")
-									let outputItem: INodeExecutionData
-
-									try {
-										outputItem = {
-											json: {
-												...inputItem.json,
-												...locals,
-												_functionCall: {
-													callId,
-													functionName,
-													timestamp: Date.now(),
-													// Embed call context for ReturnFromFunction
-													responseChannel,
-													messageId: message.id,
-													streamKey,
-													groupName,
-												},
-											},
-											index: 0,
-											binary: inputItem.binary,
-										}
-										logger.log("🌊 Function: ✅ Output item created successfully")
-										logger.log("🌊 Function: Output item JSON keys:", Object.keys(outputItem.json))
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error creating output item:", error)
-										throw new NodeOperationError(this.getNode(), `Failed to create output item: ${error.message}`)
-									}
-
-									// Execute user code if enabled
-									if (enableCode && code.trim()) {
-										logger.log("🌊 Function: JavaScript code execution enabled")
-										logger.log("🌊 Function: Code length:", code.length, "characters")
-
-										try {
-											logger.log("🌊 Function: Setting up execution context...")
-											// Execute JavaScript code with parameters as global variables
-											const context = {
-												...locals,
-												item: outputItem.json,
-												console: {
-													log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
-													error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
-													warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
-												},
-											}
-											logger.log("🌊 Function: ✅ Context created with keys:", Object.keys(context))
-
-											logger.log("🌊 Function: Wrapping user code...")
-											// Execute JavaScript code directly (n8n already provides sandboxing)
-											const wrappedCode = `
-											(function() {
-												// Set up context variables
-												${Object.keys(context)
-													.map((key) => `var ${key} = arguments[0]["${key}"];`)
-													.join("\n\t\t\t\t\t\t\t")}
-												
-												// Execute user code
-												${code}
-											})
-										`
-											logger.log("🌊 Function: ✅ Code wrapped successfully")
-
-											logger.log("🌊 Function: Executing user code...")
-											const result = eval(wrappedCode)(context)
-											logger.log("🌊 Function: ✅ Code execution completed")
-											logger.log("🌊 Function: Code execution result =", result)
-
-											// If code returns a value, merge it with locals
-											if (result !== undefined) {
-												logger.log("🌊 Function: Processing code result...")
-												if (typeof result === "object" && result !== null) {
-													logger.log("🌊 Function: Merging object result into output item")
-													// Merge locals (parameters) first, then returned object (returned object wins conflicts)
-													outputItem.json = {
-														...outputItem.json,
-														...result,
-													}
-													logger.log("🌊 Function: ✅ Object result merged")
-												} else {
-													logger.log("🌊 Function: Adding non-object result to output item")
-													// For non-object returns, include the result
-													outputItem.json = {
-														...outputItem.json,
-														result,
-													}
-													logger.log("🌊 Function: ✅ Non-object result added")
-												}
-											} else {
-												logger.log("🌊 Function: Code returned undefined, no result to merge")
-											}
-										} catch (error) {
-											logger.error("🌊 Function: ❌ Code execution error:", error)
-											logger.error("🌊 Function: Error stack:", error.stack)
-											outputItem.json = {
-												...outputItem.json,
-												_codeError: error.message,
-											}
-											logger.log("🌊 Function: ⚠️ Code error added to output item")
-										}
-									} else {
-										logger.log("🌊 Function: No JavaScript code to execute")
-									}
-
-									logger.log("🌊 Function: Preparing to emit output item...")
-									logger.log("🌊 Function: Final output item:", JSON.stringify(outputItem, null, 2))
-
-									try {
-										// Emit the item to continue the workflow
-										logger.log("🌊 Function: Emitting output item to workflow...")
-										this.emit([[outputItem]])
-										logger.log("🌊 Function: ✅ Output item emitted successfully")
-									} catch (error) {
-										logger.error("🌊 Function: ❌ Error emitting output item:", error)
-										throw new NodeOperationError(this.getNode(), `Failed to emit output item: ${error.message}`)
-									}
-
-									// Function execution complete - ReturnFromFunction node is responsible for sending response
-									logger.log("🌊 Function: ✅ Function execution completed successfully")
-									logger.log("🌊 Function: Response channel:", responseChannel)
-									logger.log("🌊 Function: Call ID:", callId)
-									logger.log("🌊 Function: Message ID:", message.id)
-									logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
-									logger.log("🌊 Function: ===== MESSAGE PROCESSING COMPLETE =====")
-
-									// Don't acknowledge the message here - ReturnFromFunction will do it
-									// The consumer loop will continue to handle more function calls
-								} catch (error) {
-									logger.error("🌊 Function: ❌ ERROR DURING MESSAGE PROCESSING:", error)
-									logger.error("🌊 Function: Error type:", error.constructor.name)
-									logger.error("🌊 Function: Error message:", error.message)
-									logger.error("🌊 Function: Error stack:", error.stack)
-									logger.log("🌊 Function: Message that caused error:", JSON.stringify(message, null, 2))
-
-									// Send error response
-									try {
-										logger.log("🌊 Function: Attempting to send error response...")
-
-										let callId, responseChannel
-										try {
-											callId = message.message.callId
-											responseChannel = message.message.responseChannel
-											logger.log("🌊 Function: ✅ Extracted error response details - callId:", callId, "responseChannel:", responseChannel)
-										} catch (extractError) {
-											logger.error("🌊 Function: ❌ Failed to extract response details:", extractError)
-											logger.log("🌊 Function: Cannot send error response, continuing to next message")
-											continue // Skip to next message if we can't extract response details
-										}
-
-										await registry.publishResponse(responseChannel, {
-											success: false,
-											error: error.message,
-											callId,
-											timestamp: Date.now(),
-										})
-										logger.log("🌊 Function: ✅ Error response sent successfully")
-
-										// Acknowledge the message even on error to prevent reprocessing
-										await registry.acknowledgeCall(streamKey, groupName, message.id)
-										logger.log("🌊 Function: ✅ Message acknowledged after error")
-
-										logger.log("🔍 DIAGNOSTIC: Error occurred, sending error response")
-										logger.log("🔍 DIAGNOSTIC: This is the ONLY time Function sends responses!")
-									} catch (responseError) {
-										logger.error("🌊 Function: ❌ Error sending error response:", responseError)
-										logger.error("🌊 Function: Response error stack:", responseError.stack)
-										logger.log("🌊 Function: Continuing to next message despite response error")
-									}
-
-									logger.log("🌊 Function: ===== ERROR HANDLING COMPLETE, CONTINUING TO NEXT MESSAGE =====")
-								}
-							}
-
-							logger.log("🌊 Function: ===== COMPLETED PROCESSING ALL MESSAGES IN BATCH =====")
-							logger.log("🌊 Function: Continuing to next loop iteration...")
-						} catch (error) {
-							if (isActive) {
-								logger.error("🌊 Function: ❌ CRITICAL ERROR in instant consumer loop:", error)
-								logger.error("🌊 Function: Error type:", error.constructor.name)
-								logger.error("🌊 Function: Error message:", error.message)
-								logger.error("🌊 Function: Error stack:", error.stack || error.message)
-								logger.log("🌊 Function: This error occurred outside of message processing")
-								logger.log("🌊 Function: Consumer loop will continue after error recovery")
-
-								// Brief pause before retrying to avoid tight error loops
-								await new Promise((resolve) => setTimeout(resolve, 1000))
-								logger.log("🌊 Function: Error recovery delay complete, continuing consumer loop")
-							} else {
-								logger.log("🌊 Function: Consumer is inactive, not recovering from error")
-							}
-						}
-					}
-
-					logger.log("🌊 Function: Consumer loop ended - isActive:", isActive, "consumerActive:", registry.isConsumerActive(functionName, scope))
-				} catch (error) {
-					logger.error("🌊 Function: Fatal error setting up instant consumer:", error)
-				} finally {
-					// Clean up recovery check interval
-					if (recoveryCheckInterval) {
-						clearInterval(recoveryCheckInterval)
-						recoveryCheckInterval = null
-						logger.log("🔍 RECOVERY: Recovery check interval cleared")
-					}
-
-					// Clean up connections
-					if (controlSubscriber) {
-						try {
-							await controlSubscriber.disconnect()
-							logger.log("🚀 INSTANT: Control subscriber disconnected")
-						} catch (error) {
-							logger.error("🚀 INSTANT: Error disconnecting control subscriber:", error)
-						}
-					}
-					if (blockingConnection) {
-						try {
-							await blockingConnection.disconnect()
-							logger.log("🚀 INSTANT: Blocking connection disconnected")
-						} catch (error) {
-							logger.error("🚀 INSTANT: Error disconnecting blocking connection:", error)
-						}
-					}
-					logger.log("🚀 INSTANT: Consumer cleanup complete")
-				}
-
-				logger.log("🌊 Function: Instant consumer loop ended")
-			}
-
-			// Start the consumer loop
-			logger.info("🔄 RESTART: About to start processStreamMessages() async function")
-			processStreamMessages().catch((error) => {
-				logger.error("🌊 Function: Fatal error in stream consumer:", error)
-			})
-
-			logger.log("🔍 DIAGNOSTIC: Stream consumer loop started asynchronously")
-			logger.log("🔍 DIAGNOSTIC: Consumer might not be ready immediately!")
-			logger.log("🔍 DIAGNOSTIC: This could cause first calls to fail")
-
-			logger.info("🔄 RESTART: Function registered successfully, stream consumer should be starting")
-
-			// Return trigger response with cleanup for queue mode
+		const functionName = this.getNodeParameter("functionName") as string
+		const scope = this.getNodeParameter("scope") as string
+		const code = this.getNodeParameter("code") as string
+
+		if (!functionName) {
+			throw new NodeOperationError(this.getNode(), "Function name is required")
+		}
+
+		logger.log("🚀 FUNCTION: Starting Function node trigger")
+		logger.log("🚀 FUNCTION: Function name:", functionName)
+		logger.log("🚀 FUNCTION: Scope:", scope)
+
+		// Check if queue mode is enabled
+		if (!isQueueModeEnabled()) {
+			logger.log("🚀 FUNCTION: Queue mode disabled, function will not process calls")
 			return {
 				closeFunction: async () => {
-					logger.log("🌊 Function: Trigger closing, cleaning up")
-
-					// Stop the consumer loop
-					isActive = false
-					registry.stopConsumer(functionName, scope)
-
-					// Clean up recovery check interval
-					if (recoveryCheckInterval) {
-						clearInterval(recoveryCheckInterval)
-						recoveryCheckInterval = null
-						logger.log("🔍 RECOVERY: Recovery check interval cleared in closeFunction")
-					}
-
-					// Send stop signal to instant consumer
-					try {
-						await registry.sendStopSignal(controlChannel)
-						logger.log("🚀 INSTANT: Stop signal sent")
-					} catch (error) {
-						logger.error("🚀 INSTANT: Error sending stop signal:", error)
-					}
-
-					// Give consumer time to stop
-					await new Promise((resolve) => setTimeout(resolve, 200))
-
-					// Stop heartbeat
-					registry.stopHeartbeat(functionName, scope)
-
-					// Unregister function
-					await registry.unregisterFunction(functionName, scope)
-
-					// Don't clean up the stream - it should persist for multiple function calls
-					// The stream will be cleaned up when the workflow is deactivated or n8n shuts down
-
-					logger.log("🌊 Function: Cleanup complete")
-				},
-				// Emit initial trigger data to activate the workflow
-				manualTriggerFunction: async () => {
-					throw new NodeOperationError(
-						this.getNode(),
-						`❌ Cannot execute Function node directly!\n\n` +
-							`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
-							`To use this function:\n` +
-							`1. Add a "Call Function" node to your workflow\n` +
-							`2. Configure it to call "${functionName}"\n` +
-							`3. Execute the workflow from the Call Function node instead\n\n` +
-							`Function nodes are triggers that wait for calls - they don't execute on their own.`
-					)
-				},
-			}
-		} else {
-			logger.debug("Queue mode disabled, using in-memory registration")
-
-			// Register function in memory only
-			await registry.registerFunction(
-				functionName,
-				scope,
-				nodeId,
-				parameterDefinitions,
-				async (parameters: Record<string, any>, inputItem: INodeExecutionData) => {
-					logger.log("🌊 Function: In-memory function called:", functionName, "with parameters:", parameters)
-
-					// Process parameters according to function definition
-					const locals: Record<string, any> = {}
-
-					for (const param of parameterList) {
-						const paramName = param.name
-						const paramType = param.type
-						const required = param.required
-						const defaultValue = param.defaultValue
-
-						let value = parameters[paramName]
-
-						// Handle required parameters
-						if (required && (value === undefined || value === null)) {
-							throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-						}
-
-						// Use default value if not provided
-						if (value === undefined || value === null) {
-							if (defaultValue !== "") {
-								try {
-									// Try to parse default value based on type
-									switch (paramType) {
-										case "number":
-											value = Number(defaultValue)
-											break
-										case "boolean":
-											value = defaultValue.toLowerCase() === "true"
-											break
-										case "object":
-										case "array":
-											value = JSON.parse(defaultValue)
-											break
-										default:
-											value = defaultValue
-									}
-								} catch (error) {
-									value = defaultValue // Fall back to string if parsing fails
-								}
-							}
-						}
-
-						locals[paramName] = value
-					}
-
-					// Generate a call ID for in-memory mode to track return values
-					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-
-					// Push current function execution context for ReturnFromFunction nodes
-					registry.pushCurrentFunctionExecution(callId)
-
-					// Clear any existing return value for this execution
-					registry.clearFunctionReturnValue(callId)
-
-					// Create the output item
-					let outputItem: INodeExecutionData = {
-						json: {
-							...inputItem.json,
-							...locals,
-							_functionCall: {
-								callId,
-								functionName,
-								timestamp: Date.now(),
-								// For in-memory mode, we don't need Redis-specific fields
-								responseChannel: null,
-								messageId: null,
-								streamKey: null,
-								groupName: null,
-							},
-						},
-						index: 0,
-						binary: inputItem.binary,
-					}
-
-					// Execute user code if enabled
-					if (enableCode && code.trim()) {
-						logger.log("🌊 Function: Executing JavaScript code in in-memory mode")
-
-						try {
-							// Execute JavaScript code with parameters as global variables
-							const context = {
-								...locals,
-								item: outputItem.json,
-								console: {
-									log: (...args: any[]) => logger.log("🌊 Function Code:", ...args),
-									error: (...args: any[]) => logger.error("🌊 Function Code:", ...args),
-									warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
-								},
-							}
-
-							// Execute JavaScript code directly (n8n already provides sandboxing)
-							const wrappedCode = `
-							(function() {
-								// Set up context variables
-								${Object.keys(context)
-									.map((key) => `var ${key} = arguments[0]["${key}"];`)
-									.join("\n\t\t\t\t\t\t\t")}
-								
-								// Execute user code
-								${code}
-							})
-						`
-
-							const result = eval(wrappedCode)(context)
-
-							logger.log("🌊 Function: Code execution result =", result)
-
-							// If code returns a value, merge it with locals
-							if (result !== undefined) {
-								if (typeof result === "object" && result !== null) {
-									// Merge locals (parameters) first, then returned object (returned object wins conflicts)
-									outputItem.json = {
-										...outputItem.json,
-										...result,
-									}
-								} else {
-									// For non-object returns, include the result
-									outputItem.json = {
-										...outputItem.json,
-										result,
-									}
-								}
-							}
-						} catch (error) {
-							logger.error("🌊 Function: Code execution error:", error)
-							outputItem.json = {
-								...outputItem.json,
-								_codeError: error.message,
-							}
-						}
-					}
-
-					logger.log("🌊 Function: Emitting output item to downstream nodes")
-					this.emit([[outputItem]])
-
-					// Function execution complete - ReturnFromFunction node is responsible for handling return value
-					logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
-					logger.log("🌊 Function: Call ID:", callId)
-					logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction resolves return value")
-
-					// Wait forever for ReturnFromFunction to resolve the return value
-					const returnValue = await registry.waitForReturn(callId)
-					logger.log("🌊 Function: ✅ Return value received:", returnValue)
-
-					return [outputItem]
-				},
-				false
-			)
-
-			logger.info("Function registered successfully in in-memory mode")
-
-			// Return trigger response with cleanup for in-memory mode
-			return {
-				closeFunction: async () => {
-					logger.log("🌊 Function: Trigger closing, cleaning up in-memory function")
-					await registry.unregisterFunction(functionName, scope)
-				},
-				// Emit initial trigger data to activate the workflow
-				manualTriggerFunction: async () => {
-					throw new NodeOperationError(
-						this.getNode(),
-						`❌ Cannot execute Function node directly!\n\n` +
-							`Function nodes are designed to be called by "Call Function" nodes, not executed directly.\n\n` +
-							`To use this function:\n` +
-							`1. Add a "Call Function" node to your workflow\n` +
-							`2. Configure it to call "${functionName}"\n` +
-							`3. Execute the workflow from the Call Function node instead\n\n` +
-							`Function nodes are triggers that wait for calls - they don't execute on their own.`
-					)
+					logger.log("🚀 FUNCTION: Function node closed (queue mode disabled)")
 				},
 			}
 		}
+
+		let lifecycleManager: ConsumerLifecycleManager | null = null
+		let connectionManager: RedisConnectionManager | null = null
+
+		try {
+			// Get Redis configuration
+			const redisConfig = getRedisConfig()
+			if (!redisConfig) {
+				throw new NodeOperationError(this.getNode(), "Redis configuration not available")
+			}
+
+			// Initialize connection manager
+			connectionManager = RedisConnectionManager.getInstance(redisConfig)
+
+			// Create consumer configuration
+			const consumerConfig: ConsumerConfig = {
+				functionName,
+				scope,
+				streamKey: `function_calls:${functionName}:${scope}`,
+				groupName: `function_group:${functionName}:${scope}`,
+				processId: process.pid.toString(),
+				workerId: this.getInstanceId() || "unknown",
+			}
+
+			// Create message handler
+			const messageHandler = async (messageData: any) => {
+				return await processMessage(messageData, code)
+			}
+
+			// Create and start lifecycle manager
+			lifecycleManager = new ConsumerLifecycleManager(consumerConfig, redisConfig, messageHandler)
+
+			await lifecycleManager.start()
+
+			logger.log("🚀 FUNCTION: ✅ Function node started successfully")
+			logger.log("🚀 FUNCTION: Consumer ID:", lifecycleManager.getConsumerId())
+
+			return {
+				closeFunction: async () => {
+					logger.log("🚀 FUNCTION: Closing Function node...")
+
+					try {
+						if (lifecycleManager) {
+							await lifecycleManager.stop()
+						}
+
+						if (connectionManager) {
+							await connectionManager.shutdown()
+						}
+
+						logger.log("🚀 FUNCTION: ✅ Function node closed successfully")
+					} catch (error) {
+						logger.error("🚀 FUNCTION: ❌ Error closing Function node:", error)
+					}
+				},
+			}
+		} catch (error) {
+			logger.error("🚀 FUNCTION: ❌ Failed to start Function node:", error)
+
+			// Cleanup on error
+			try {
+				if (lifecycleManager) {
+					await lifecycleManager.stop()
+				}
+				if (connectionManager) {
+					await connectionManager.shutdown()
+				}
+			} catch (cleanupError) {
+				logger.error("🚀 FUNCTION: ❌ Error during cleanup:", cleanupError)
+			}
+
+			throw new NodeOperationError(this.getNode(), `Failed to start function: ${error}`)
+		}
+	}
+
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		// This should not be called for trigger nodes
+		throw new NodeOperationError(this.getNode(), "Function node should be used as a trigger, not executed directly")
+	}
+}
+
+/**
+ * Process a message from the Redis stream
+ */
+async function processMessage(messageData: any, code: string): Promise<any> {
+	const startTime = Date.now()
+
+	try {
+		logger.log("🚀 FUNCTION: Processing message:", messageData)
+
+		// Parse message data
+		const { input, callId } = messageData
+
+		if (!callId) {
+			throw new NodeOperationError(null as any, "Message missing callId")
+		}
+
+		// Parse input data
+		let parsedInput
+		try {
+			parsedInput = typeof input === "string" ? JSON.parse(input) : input
+		} catch (error) {
+			throw new NodeOperationError(null as any, `Failed to parse input data: ${error}`)
+		}
+
+		// Execute the function code
+		const result = await executeFunction(code, parsedInput)
+
+		// Send result back via Redis
+		await sendResult(callId, result, null)
+
+		const processingTime = Date.now() - startTime
+		logger.log("🚀 FUNCTION: ✅ Message processed successfully in", processingTime, "ms")
+
+		return result
+	} catch (error) {
+		const processingTime = Date.now() - startTime
+		logger.error("🚀 FUNCTION: ❌ Error processing message:", error, "in", processingTime, "ms")
+
+		// Send error back via Redis
+		try {
+			const { callId } = messageData
+			if (callId) {
+				await sendResult(callId, null, String(error))
+			}
+		} catch (sendError) {
+			logger.error("🚀 FUNCTION: ❌ Error sending error result:", sendError)
+		}
+
+		throw error
+	}
+}
+
+/**
+ * Execute the function code safely
+ */
+async function executeFunction(code: string, input: any): Promise<any> {
+	try {
+		// Create a safe execution context
+		const context = {
+			input,
+			console: {
+				log: (...args: any[]) => logger.log("🚀 FUNCTION: [USER]", ...args),
+				error: (...args: any[]) => logger.error("🚀 FUNCTION: [USER]", ...args),
+				warn: (...args: any[]) => logger.log("🚀 FUNCTION: [USER] WARN:", ...args),
+				info: (...args: any[]) => logger.log("🚀 FUNCTION: [USER] INFO:", ...args),
+			},
+			// Add other safe globals as needed
+		}
+
+		// Create function with context
+		const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+		const func = new AsyncFunction("input", "console", code)
+
+		// Execute function
+		const result = await func(input, context.console)
+
+		logger.log("🚀 FUNCTION: Function executed successfully, result:", result)
+		return result
+	} catch (error) {
+		logger.error("🚀 FUNCTION: ❌ Error executing function code:", error)
+		throw new NodeOperationError(null as any, `Function execution failed: ${error}`)
+	}
+}
+
+/**
+ * Send result back via Redis
+ */
+async function sendResult(callId: string, result: any, error: string | null): Promise<void> {
+	try {
+		const redisConfig = getRedisConfig()
+		if (!redisConfig) {
+			throw new NodeOperationError(null as any, "Redis configuration not available")
+		}
+
+		const connectionManager = RedisConnectionManager.getInstance(redisConfig)
+
+		await connectionManager.executeOperation(async (client) => {
+			const resultData = {
+				callId,
+				result: result ? JSON.stringify(result) : null,
+				error,
+				timestamp: Date.now(),
+				status: error ? "error" : "success",
+			}
+
+			// Send to result stream
+			await client.xAdd(`function_results:${callId}`, "*", resultData)
+
+			// Also set as a key for immediate retrieval
+			await client.setEx(`result:${callId}`, 300, JSON.stringify(resultData)) // 5 minute expiry
+
+			logger.log("🚀 FUNCTION: ✅ Result sent successfully for call:", callId)
+		}, `send-result-${callId}`)
+	} catch (error) {
+		logger.error("🚀 FUNCTION: ❌ Error sending result:", error)
+		throw error
 	}
 }

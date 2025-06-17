@@ -667,7 +667,7 @@ export class CallFunction implements INodeType {
 							logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
 						}
 
-						const returnValue = await registry.getFunctionReturnValue(returnValueKey)
+						const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
 						logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
 
 						let finalReturnValue = resultItem.json
@@ -675,7 +675,7 @@ export class CallFunction implements INodeType {
 						// Clear the return value from registry after retrieving it
 						if (returnValue !== null) {
 							logger.log("🔧 CallFunction: Clearing return value from registry...")
-							await registry.clearFunctionReturnValue(returnValueKey)
+							await registry.clearFunctionReturnValue(returnValueKey!)
 							logger.log("🔧 CallFunction: Return value cleared")
 							finalReturnValue = returnValue
 						} else {
