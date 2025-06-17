@@ -28,13 +28,6 @@ export class Function implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
-				displayName: "Global Function",
-				name: "globalFunction",
-				type: "boolean",
-				default: false,
-				description: "Whether this function will be registered globally and callable from any workflow",
-			},
-			{
 				displayName: "Function Parameters",
 				name: "parameters",
 				placeholder: "Add parameter",
@@ -146,7 +139,6 @@ export class Function implements INodeType {
 		logger.info("Starting stream-based trigger setup")
 
 		// Get function configuration
-		const globalFunction = this.getNodeParameter("globalFunction", 0) as boolean
 		const functionName = this.getNode().name
 		const parameters = this.getNodeParameter("parameters", 0, {}) as any
 		const parameterList = parameters.parameter || []
@@ -158,11 +150,10 @@ export class Function implements INodeType {
 		const nodeId = this.getNode().id
 		const workflowId = this.getWorkflow().id || "unknown"
 
-		// Determine scope for stream registration
-		const scope = globalFunction ? "__global__" : workflowId
+		// Determine scope for stream registration - always use workflow ID
+		const scope = workflowId
 
 		logger.info("Registering function:", functionName, "with scope:", scope)
-		logger.debug("Global function:", globalFunction)
 		logger.debug("Workflow ID:", workflowId)
 		logger.debug("Parameter list:", parameterList)
 

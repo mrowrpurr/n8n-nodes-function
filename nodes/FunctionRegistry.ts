@@ -961,29 +961,15 @@ class FunctionRegistry {
 
 		// If scope is specified, use the workflow cache for accurate scoping
 		if (scope) {
-			if (scope === "__global__") {
-				// Get global functions
-				for (const listener of this.listeners.values()) {
-					if (listener.executionId === "__global__") {
-						functionNames.add(listener.functionName)
-					}
-				}
-			} else {
-				// Get functions for specific workflow using cache
-				const workflowFunctions = this.getFunctionsForWorkflow(scope)
-				for (const functionName of workflowFunctions) {
-					functionNames.add(functionName)
-				}
-				logger.log(`📋 Found ${workflowFunctions.length} functions in cache for workflow ${scope}:`, workflowFunctions)
+			// Get functions for specific workflow using cache
+			const workflowFunctions = this.getFunctionsForWorkflow(scope)
+			for (const functionName of workflowFunctions) {
+				functionNames.add(functionName)
 			}
+			logger.log(`📋 Found ${workflowFunctions.length} functions in cache for workflow ${scope}:`, workflowFunctions)
 		} else {
-			// No scope specified - only show global functions to prevent cross-workflow leakage
-			logger.log(`📋 No scope specified, only showing global functions`)
-			for (const listener of this.listeners.values()) {
-				if (listener.executionId === "__global__") {
-					functionNames.add(listener.functionName)
-				}
-			}
+			// No scope specified - return empty list to prevent cross-workflow leakage
+			logger.log(`📋 No scope specified, returning empty function list`)
 		}
 
 		// Get functions from Redis (other processes) - only in queue mode
