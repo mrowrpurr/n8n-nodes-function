@@ -222,7 +222,7 @@ export class CallFunction implements INodeType {
 
 				const registry = await getFunctionRegistry()
 
-				// Clean up stale functions before getting available functions
+				// Conservative cleanup - only remove functions without healthy workers
 				try {
 					const cleanedCount = await registry.cleanupStaleFunctions()
 					if (cleanedCount > 0) {

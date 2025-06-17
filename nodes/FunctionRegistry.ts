@@ -170,7 +170,7 @@ export class FunctionRegistry {
 					}
 
 					// If no healthy workers, remove the function
-					if (!hasHealthyWorkers && workers.length === 0) {
+					if (!hasHealthyWorkers) {
 						await this.unregisterFunction(name, scope)
 						cleanedCount++
 						logger.log("🏗️ REGISTRY: ✅ Cleaned up stale function:", name, "scope:", scope)
@@ -180,6 +180,38 @@ export class FunctionRegistry {
 				return cleanedCount
 			}, `cleanup-stale-functions`)
 		}, `cleanup-stale-functions`)
+	}
+
+	/**
+	 * Nuclear cleanup - remove ALL functions for a specific workflow
+	 */
+	async clearAllFunctionsForWorkflow(workflowId: string): Promise<number> {
+		if (!isQueueModeEnabled()) {
+			return 0
+		}
+
+		return await this.circuitBreaker.execute(async () => {
+			return await this.connectionManager.executeOperation(async (client) => {
+				const registryKey = `registry:functions`
+				const functionKeys = await client.sMembers(registryKey)
+				let cleanedCount = 0
+
+				for (const functionKey of functionKeys) {
+					const [name, scope] = functionKey.split(":")
+					const fullKey = `function:${name}:${scope}`
+					const functionData = await client.hGetAll(fullKey)
+
+					// If this function belongs to the specified workflow, remove it
+					if (functionData && functionData.workflowId === workflowId) {
+						await this.unregisterFunction(name, scope)
+						cleanedCount++
+						logger.log("🏗️ REGISTRY: ✅ Nuclear cleanup - removed function:", name, "scope:", scope)
+					}
+				}
+
+				return cleanedCount
+			}, `clear-workflow-functions-${workflowId}`)
+		}, `clear-workflow-functions-${workflowId}`)
 	}
 
 	/**
