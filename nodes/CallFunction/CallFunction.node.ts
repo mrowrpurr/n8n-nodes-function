@@ -492,10 +492,23 @@ export class CallFunction implements INodeType {
 					logger.log("🌊 CallFunction: Response channel:", responseChannel)
 
 					// Check if any workers are available for this function
-					const availableWorkers = await registry.getAvailableWorkers(functionName)
+					// Add retry logic to handle race conditions during workflow save/restart
+					let availableWorkers = await registry.getAvailableWorkers(functionName)
+					let retryCount = 0
+					const maxRetries = 3
+					const retryDelay = 1000 // 1 second
+
+					while (availableWorkers.length === 0 && retryCount < maxRetries) {
+						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)
+						logger.log(`🔄 CallFunction: This is normal during workflow save/restart`)
+
+						await new Promise((resolve) => setTimeout(resolve, retryDelay))
+						availableWorkers = await registry.getAvailableWorkers(functionName)
+						retryCount++
+					}
 
 					if (availableWorkers.length === 0) {
-						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
+						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available after ${maxRetries} retries`)
 					}
 
 					// Filter workers by health check
