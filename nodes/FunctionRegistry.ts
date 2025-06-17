@@ -261,6 +261,70 @@ export class FunctionRegistry {
 	}
 
 	/**
+	 * Register a worker for a function
+	 */
+	async registerWorker(workerId: string, functionName: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		await this.circuitBreaker.execute(async () => {
+			await this.connectionManager.executeOperation(async (client) => {
+				const workersKey = `workers:${functionName}`
+				const workerKey = `worker:${workerId}:${functionName}`
+
+				// Add worker to the set
+				await client.sAdd(workersKey, workerId)
+
+				// Set worker health timestamp
+				await client.setEx(workerKey, this.WORKER_TIMEOUT / 1000, Date.now().toString())
+
+				logger.log("🏗️ REGISTRY: ✅ Worker registered:", workerId, "for function:", functionName)
+			}, `register-worker-${workerId}`)
+		}, `register-worker-${workerId}`)
+	}
+
+	/**
+	 * Unregister a worker for a function
+	 */
+	async unregisterWorker(workerId: string, functionName: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		await this.circuitBreaker.execute(async () => {
+			await this.connectionManager.executeOperation(async (client) => {
+				const workersKey = `workers:${functionName}`
+				const workerKey = `worker:${workerId}:${functionName}`
+
+				// Remove worker from the set
+				await client.sRem(workersKey, workerId)
+
+				// Remove worker health key
+				await client.del(workerKey)
+
+				logger.log("🏗️ REGISTRY: ✅ Worker unregistered:", workerId, "for function:", functionName)
+			}, `unregister-worker-${workerId}`)
+		}, `unregister-worker-${workerId}`)
+	}
+
+	/**
+	 * Update worker health timestamp
+	 */
+	async updateWorkerHealth(workerId: string, functionName: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		await this.circuitBreaker.execute(async () => {
+			await this.connectionManager.executeOperation(async (client) => {
+				const workerKey = `worker:${workerId}:${functionName}`
+				await client.setEx(workerKey, this.WORKER_TIMEOUT / 1000, Date.now().toString())
+			}, `update-worker-health-${workerId}`)
+		}, `update-worker-health-${workerId}`)
+	}
+
+	/**
 	 * Check if worker is healthy
 	 */
 	async isWorkerHealthy(workerId: string, functionName: string): Promise<boolean> {

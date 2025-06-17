@@ -90,6 +90,9 @@ return {
 		}
 
 		let lifecycleManager: ConsumerLifecycleManager | null = null
+		let registry: any = null
+		let workerId: string | null = null
+		let healthUpdateInterval: NodeJS.Timeout | null = null
 
 		try {
 			// Get Redis configuration
@@ -117,7 +120,7 @@ return {
 			}
 
 			// Register function in registry so CallFunction can find it
-			const registry = await getFunctionRegistry()
+			registry = await getFunctionRegistry()
 			await registry.registerFunction({
 				name: functionName,
 				scope: scope,
@@ -133,6 +136,25 @@ return {
 
 			await lifecycleManager.start()
 
+			// CRITICAL: Register this node as a worker for the function
+			workerId = lifecycleManager.getConsumerId()
+			if (workerId) {
+				await registry.registerWorker(workerId, functionName)
+				logger.log("🚀 FUNCTION: ✅ Worker registered:", workerId)
+
+				// Start periodic health updates (every 10 seconds)
+				healthUpdateInterval = setInterval(async () => {
+					try {
+						if (workerId && registry) {
+							await registry.updateWorkerHealth(workerId, functionName)
+						}
+					} catch (error) {
+						logger.error("🚀 FUNCTION: ❌ Error updating worker health:", error)
+					}
+				}, 10000)
+				logger.log("🚀 FUNCTION: ✅ Worker health updates started")
+			}
+
 			logger.log("🚀 FUNCTION: ✅ Function node started successfully")
 			logger.log("🚀 FUNCTION: Consumer ID:", lifecycleManager.getConsumerId())
 
@@ -141,6 +163,20 @@ return {
 					logger.log("🚀 FUNCTION: Closing Function node...")
 
 					try {
+						// Stop health updates
+						if (healthUpdateInterval) {
+							clearInterval(healthUpdateInterval)
+							healthUpdateInterval = null
+							logger.log("🚀 FUNCTION: ✅ Worker health updates stopped")
+						}
+
+						// Unregister worker
+						if (workerId && registry) {
+							await registry.unregisterWorker(workerId, functionName)
+							logger.log("🚀 FUNCTION: ✅ Worker unregistered:", workerId)
+						}
+
+						// Stop lifecycle manager
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
 						}
@@ -158,6 +194,18 @@ return {
 
 			// Cleanup on error
 			try {
+				// Stop health updates
+				if (healthUpdateInterval) {
+					clearInterval(healthUpdateInterval)
+					healthUpdateInterval = null
+				}
+
+				// Unregister worker
+				if (workerId && registry) {
+					await registry.unregisterWorker(workerId, functionName)
+				}
+
+				// Stop lifecycle manager
 				if (lifecycleManager) {
 					await lifecycleManager.stop()
 				}
@@ -184,6 +232,12 @@ async function processMessage(messageData: any, code: string): Promise<any> {
 
 	try {
 		logger.log("🚀 FUNCTION: Processing message:", messageData)
+
+		// Skip initialization messages - they're just for stream setup
+		if (messageData.init === "stream_initialization") {
+			logger.log("🚀 FUNCTION: ✅ Skipping initialization message")
+			return { skipped: true, reason: "initialization_message" }
+		}
 
 		// Parse message data
 		const { input, callId } = messageData
@@ -275,9 +329,9 @@ async function sendResult(callId: string, result: any, error: string | null): Pr
 		await connectionManager.executeOperation(async (client) => {
 			const resultData = {
 				callId,
-				result: result ? JSON.stringify(result) : null,
-				error,
-				timestamp: Date.now(),
+				result: result ? JSON.stringify(result) : "",
+				error: error || "",
+				timestamp: Date.now().toString(),
 				status: error ? "error" : "success",
 			}
 
@@ -285,7 +339,17 @@ async function sendResult(callId: string, result: any, error: string | null): Pr
 			await client.xAdd(`function_results:${callId}`, "*", resultData)
 
 			// Also set as a key for immediate retrieval
-			await client.setEx(`result:${callId}`, 300, JSON.stringify(resultData)) // 5 minute expiry
+			await client.setEx(
+				`result:${callId}`,
+				300,
+				JSON.stringify({
+					callId,
+					result: result ? JSON.stringify(result) : null,
+					error,
+					timestamp: Date.now(),
+					status: error ? "error" : "success",
+				})
+			) // 5 minute expiry
 
 			logger.log("🚀 FUNCTION: ✅ Result sent successfully for call:", callId)
 		}, `send-result-${callId}`)

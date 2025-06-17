@@ -485,7 +485,7 @@ export class CallFunction implements INodeType {
 					// Generate unique call ID
 					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
 					const responseChannel = `function:response:${callId}`
-					const streamKey = `function:stream:${targetScope}:${functionName}`
+					const streamKey = `function_calls:${functionName}:global`
 
 					logger.log("🌊 CallFunction: Call ID:", callId)
 					logger.log("🌊 CallFunction: Stream key:", streamKey)
@@ -571,7 +571,7 @@ export class CallFunction implements INodeType {
 					logger.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
 
 					// Check if stream is ready before making the call
-					const groupName = `group:${functionName}`
+					const groupName = `function_group:${functionName}:global`
 					logger.log("🔍 DIAGNOSTIC: Checking if stream is ready")
 					logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
 					logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
