@@ -38,13 +38,6 @@ export class Function implements INodeType {
 				required: true,
 			},
 			{
-				displayName: "Scope",
-				name: "scope",
-				type: "string",
-				default: "global",
-				description: "The scope of the function (e.g., global, user, workflow)",
-			},
-			{
 				displayName: "Code",
 				name: "code",
 				type: "string",
@@ -68,7 +61,6 @@ return {
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		const functionName = this.getNodeParameter("functionName") as string
-		const scope = this.getNodeParameter("scope") as string
 		const code = this.getNodeParameter("code") as string
 
 		if (!functionName) {
@@ -77,7 +69,6 @@ return {
 
 		logger.log("🚀 FUNCTION: Starting Function node trigger")
 		logger.log("🚀 FUNCTION: Function name:", functionName)
-		logger.log("🚀 FUNCTION: Scope:", scope)
 
 		// Check if queue mode is enabled
 		if (!isQueueModeEnabled()) {
@@ -105,11 +96,12 @@ return {
 			RedisConnectionManager.getInstance(redisConfig)
 
 			// Create consumer configuration
+			const workflowId = this.getWorkflow().id || "unknown"
 			const consumerConfig: ConsumerConfig = {
 				functionName,
-				scope,
-				streamKey: `function_calls:${functionName}:${scope}`,
-				groupName: `function_group:${functionName}:${scope}`,
+				scope: workflowId,
+				streamKey: `function_calls:${functionName}:${workflowId}`,
+				groupName: `function_group:${functionName}:${workflowId}`,
 				processId: process.pid.toString(),
 				workerId: this.getInstanceId() || "unknown",
 			}
@@ -123,10 +115,10 @@ return {
 			registry = await getFunctionRegistry()
 			await registry.registerFunction({
 				name: functionName,
-				scope: scope,
+				scope: workflowId,
 				code: code,
 				parameters: [], // TODO: Extract parameters from code if needed
-				workflowId: this.getWorkflow().id || "unknown",
+				workflowId: workflowId,
 				nodeId: this.getNode().id,
 			})
 			logger.log("🚀 FUNCTION: ✅ Function registered in registry")
