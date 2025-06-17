@@ -267,6 +267,15 @@ export class Function implements INodeType {
 					})
 					logger.log("🚀 INSTANT: Control subscriber ready")
 
+					// Wait for stream to be available before starting consumer loop
+					logger.log("🚀 INSTANT: Waiting for stream to be available...")
+					const streamAvailable = await registry.waitForStreamAvailable(streamKey, groupName, 10000) // 10 second timeout
+					if (!streamAvailable) {
+						logger.warn("🚀 INSTANT: Stream not available after timeout, proceeding anyway (will handle NOGROUP errors)")
+					} else {
+						logger.log("🚀 INSTANT: Stream is available, starting consumer loop")
+					}
+
 					// Main consumer loop with instant response
 					logger.log("🚀 INSTANT: Starting main consumer loop")
 					while (isActive && registry.isConsumerActive(functionName, scope)) {
@@ -281,6 +290,10 @@ export class Function implements INodeType {
 							if (messages.length > 0) {
 								logger.log("🚀 INSTANT: Message received INSTANTLY!")
 								logger.log("🚀 INSTANT: Processing", messages.length, "messages")
+							} else {
+								// If no messages and we're getting NOGROUP errors, add a small delay
+								// to prevent hammering Redis while the stream is being set up
+								await new Promise((resolve) => setTimeout(resolve, 100))
 							}
 
 							for (const message of messages) {

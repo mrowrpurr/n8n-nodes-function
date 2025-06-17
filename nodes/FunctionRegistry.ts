@@ -646,6 +646,56 @@ class FunctionRegistry {
 	}
 
 	/**
+	 * Wait for stream and consumer group to be available across all Redis connections
+	 */
+	async waitForStreamAvailable(streamKey: string, groupName: string, timeoutMs: number = 5000): Promise<boolean> {
+		const startTime = Date.now()
+		const checkInterval = 100 // Check every 100ms
+		let checkCount = 0
+
+		while (Date.now() - startTime < timeoutMs) {
+			checkCount++
+			try {
+				await this.ensureRedisConnection()
+				if (!this.client) return false
+
+				// Check if stream exists
+				const streamExists = await this.client.exists(streamKey)
+				if (!streamExists) {
+					logger.log(`🔍 STREAM WAIT: Stream does not exist yet: ${streamKey} (check #${checkCount})`)
+					await new Promise((resolve) => setTimeout(resolve, checkInterval))
+					continue
+				}
+
+				// Check if consumer group exists
+				try {
+					const groups = await this.client.xInfoGroups(streamKey)
+					const targetGroup = groups.find((group: any) => group.name === groupName)
+
+					if (!targetGroup) {
+						logger.log(`🔍 STREAM WAIT: Consumer group does not exist yet: ${groupName} (check #${checkCount})`)
+						await new Promise((resolve) => setTimeout(resolve, checkInterval))
+						continue
+					}
+
+					logger.log(`🔍 STREAM WAIT: Stream and group are available after ${Date.now() - startTime}ms and ${checkCount} checks`)
+					return true
+				} catch (groupError) {
+					logger.log(`🔍 STREAM WAIT: Error checking groups: ${groupError.message} (check #${checkCount})`)
+					await new Promise((resolve) => setTimeout(resolve, checkInterval))
+					continue
+				}
+			} catch (error) {
+				logger.error(`🔍 STREAM WAIT: Error during availability check:`, error)
+				await new Promise((resolve) => setTimeout(resolve, checkInterval))
+			}
+		}
+
+		logger.log(`🔍 STREAM WAIT: Timeout after ${timeoutMs}ms and ${checkCount} checks`)
+		return false
+	}
+
+	/**
 	 * Create a dedicated blocking connection for instant response
 	 */
 	async createDedicatedBlockingConnection(): Promise<any> {
@@ -700,6 +750,13 @@ class FunctionRegistry {
 			logger.log("🚀 INSTANT: Read", streamMessages.messages.length, "messages instantly from", streamKey)
 			return streamMessages.messages
 		} catch (error) {
+			// Check if this is a NOGROUP error (stream/group doesn't exist yet)
+			if (error.message && error.message.includes("NOGROUP")) {
+				logger.log("🚀 INSTANT: Stream/group not ready yet, will retry on next loop iteration")
+				// Return empty array to continue the loop - the stream will be created soon
+				return []
+			}
+
 			logger.error("🚀 INSTANT: Error reading from stream:", error)
 			return []
 		}
