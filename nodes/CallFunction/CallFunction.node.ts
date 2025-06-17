@@ -495,12 +495,12 @@ export class CallFunction implements INodeType {
 					// Add retry logic to handle race conditions during workflow save/restart
 					let availableWorkers = await registry.getAvailableWorkers(functionName)
 					let retryCount = 0
-					const maxRetries = 3
-					const retryDelay = 1000 // 1 second
+					const maxRetries = 6 // Increased from 3 to 6
+					const retryDelay = 1000 // 1 second (total 6 seconds)
 
 					while (availableWorkers.length === 0 && retryCount < maxRetries) {
 						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)
-						logger.log(`🔄 CallFunction: This is normal during workflow save/restart`)
+						logger.log(`🔄 CallFunction: This is normal during workflow save/restart - Function node may take up to 6 seconds to restart`)
 
 						await new Promise((resolve) => setTimeout(resolve, retryDelay))
 						availableWorkers = await registry.getAvailableWorkers(functionName)
@@ -508,7 +508,10 @@ export class CallFunction implements INodeType {
 					}
 
 					if (availableWorkers.length === 0) {
-						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available after ${maxRetries} retries`)
+						throw new NodeOperationError(
+							this.getNode(),
+							`Function '${functionName}' not found or no workers available after ${maxRetries} retries (${maxRetries} seconds). This usually means the Function node is not running or the workflow containing the Function node is not active.`
+						)
 					}
 
 					// Filter workers by health check
