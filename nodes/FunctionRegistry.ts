@@ -108,6 +108,81 @@ export class FunctionRegistry {
 	}
 
 	/**
+	 * Unregister a function
+	 */
+	async unregisterFunction(functionName: string, scope: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		await this.circuitBreaker.execute(async () => {
+			await this.connectionManager.executeOperation(async (client) => {
+				const functionKey = `function:${functionName}:${scope}`
+				const registryKey = `registry:functions`
+
+				// Remove from global registry
+				await client.sRem(registryKey, `${functionName}:${scope}`)
+
+				// Remove function definition
+				await client.del(functionKey)
+
+				// Clean up workers for this function
+				const workersKey = `workers:${functionName}`
+				const workers = await client.sMembers(workersKey)
+				for (const workerId of workers) {
+					const workerKey = `worker:${workerId}:${functionName}`
+					await client.del(workerKey)
+				}
+				await client.del(workersKey)
+
+				logger.log("🏗️ REGISTRY: ✅ Function unregistered:", functionName, "scope:", scope)
+			}, `unregister-function-${functionName}`)
+		}, `unregister-function-${functionName}`)
+	}
+
+	/**
+	 * Clean up stale functions (functions without active workers)
+	 */
+	async cleanupStaleFunctions(): Promise<number> {
+		if (!isQueueModeEnabled()) {
+			return 0
+		}
+
+		return await this.circuitBreaker.execute(async () => {
+			return await this.connectionManager.executeOperation(async (client) => {
+				const registryKey = `registry:functions`
+				const functionKeys = await client.sMembers(registryKey)
+				let cleanedCount = 0
+
+				for (const functionKey of functionKeys) {
+					const [name, scope] = functionKey.split(":")
+					const workersKey = `workers:${name}`
+					const workers = await client.sMembers(workersKey)
+
+					// Check if any workers are healthy
+					let hasHealthyWorkers = false
+					for (const workerId of workers) {
+						const isHealthy = await this.isWorkerHealthy(workerId, name)
+						if (isHealthy) {
+							hasHealthyWorkers = true
+							break
+						}
+					}
+
+					// If no healthy workers, remove the function
+					if (!hasHealthyWorkers && workers.length === 0) {
+						await this.unregisterFunction(name, scope)
+						cleanedCount++
+						logger.log("🏗️ REGISTRY: ✅ Cleaned up stale function:", name, "scope:", scope)
+					}
+				}
+
+				return cleanedCount
+			}, `cleanup-stale-functions`)
+		}, `cleanup-stale-functions`)
+	}
+
+	/**
 	 * Get available functions for a workflow
 	 */
 	async getAvailableFunctions(workflowId: string): Promise<Array<{ name: string; value: string; description: string }>> {

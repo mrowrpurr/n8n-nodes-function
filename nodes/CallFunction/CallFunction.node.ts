@@ -221,6 +221,17 @@ export class CallFunction implements INodeType {
 				}
 
 				const registry = await getFunctionRegistry()
+
+				// Clean up stale functions before getting available functions
+				try {
+					const cleanedCount = await registry.cleanupStaleFunctions()
+					if (cleanedCount > 0) {
+						logger.log("🔧 CallFunction: Cleaned up", cleanedCount, "stale functions")
+					}
+				} catch (error) {
+					logger.warn("🔧 CallFunction: Error cleaning up stale functions:", error)
+				}
+
 				const availableFunctions = await registry.getAvailableFunctions(workflowId)
 
 				// If no functions found, add a helpful message

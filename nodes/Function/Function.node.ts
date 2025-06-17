@@ -237,6 +237,12 @@ export class Function implements INodeType {
 							logger.log("🚀 FUNCTION: ✅ Worker unregistered:", workerId)
 						}
 
+						// Unregister function from registry
+						if (registry) {
+							await registry.unregisterFunction(functionName, workflowId)
+							logger.log("🚀 FUNCTION: ✅ Function unregistered:", functionName)
+						}
+
 						// Stop lifecycle manager
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
