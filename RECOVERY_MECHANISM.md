@@ -6,25 +6,44 @@ This document describes the recovery mechanism implemented to handle the issue w
 
 ## Problem Description
 
-In n8n queue mode, when a workflow containing Function nodes is saved (Ctrl+S), the Function node triggers are not properly restarted. This causes:
+In n8n queue mode, when a workflow containing Function nodes is saved (Ctrl+S), the Function node consumer loop exits prematurely. This causes:
 
 1. **First function call after restart**: Works fine
-2. **After saving workflow**: Function trigger stops completely
+2. **After saving workflow**: Consumer processes orphaned messages then exits
 3. **Subsequent function calls**: Hang forever because no consumer is processing the Redis stream
-4. **After canceling and retrying**: Works again (trigger somehow restarts)
+4. **After canceling and retrying**: Works again (consumer restarts)
 
 ## Root Cause
 
 The issue occurs because:
 - Function node triggers run in the main n8n process (not in workers)
-- When saving a workflow, n8n deactivates and reactivates it
-- The Function trigger is not being properly restarted during reactivation
+- When saving a workflow, n8n deactivates and reactivates the Function trigger properly
+- **However, the consumer loop exits prematurely after processing orphaned messages**
+- The consumer loop was not properly handling NOGROUP errors and empty message arrays
 - Health checks still show workers as "healthy" because heartbeats haven't expired
 - CallFunction nodes add messages to Redis streams but no consumer processes them
 
 ## Recovery Mechanism Components
 
-### 1. Detection Methods (FunctionRegistry.ts)
+### 1. Consumer Loop Fixes (Function.node.ts & FunctionRegistry.ts)
+
+#### Enhanced Error Handling in `readCallsInstant()`
+- **NOGROUP Error Recovery**: When streams are recreated, properly handle NOGROUP errors
+- **Stream Stabilization**: Add delays after stream recreation to let Redis stabilize
+- **Continuous Operation**: Always return empty arrays instead of throwing errors to keep consumer loop running
+- **Better Logging**: Detailed logging to track exactly where issues occur
+
+#### Improved Consumer Loop Logic
+- **Loop Continuation**: Explicit `continue` statements to ensure loop doesn't exit prematurely
+- **State Checking**: Enhanced logging of `isActive` and `consumerActive` states
+- **Error Recovery**: Better error handling with longer delays to prevent tight error loops
+- **Exit Logging**: Clear logging when and why the consumer loop exits
+
+#### Control Signal Monitoring
+- **Enhanced Control Subscriber**: Better logging of stop signals and control channels
+- **Premature Exit Detection**: Track when control signals are received unexpectedly
+
+### 2. Detection Methods (FunctionRegistry.ts)
 
 #### `hasActiveConsumers(streamKey, groupName)`
 - Checks if there are any active consumers for a Redis stream

@@ -263,9 +263,11 @@ export class Function implements INodeType {
 					// Set up control subscriber for graceful shutdown
 					controlSubscriber = await registry.createControlSubscriber(controlChannel, () => {
 						logger.log("🚀 INSTANT: Received stop signal, ending consumer")
+						logger.log("🚀 INSTANT: Control channel:", controlChannel)
+						logger.log("🚀 INSTANT: This will cause the consumer loop to exit")
 						isActive = false
 					})
-					logger.log("🚀 INSTANT: Control subscriber ready")
+					logger.log("🚀 INSTANT: Control subscriber ready for channel:", controlChannel)
 
 					// Wait for stream to be available before starting consumer loop
 					logger.log("🚀 INSTANT: Waiting for stream to be available...")
@@ -322,19 +324,33 @@ export class Function implements INodeType {
 					while (isActive && registry.isConsumerActive(functionName, scope)) {
 						try {
 							logger.log("🚀 INSTANT: About to call readCallsInstant with BLOCK 0...")
+							logger.log("🚀 INSTANT: Loop iteration - isActive:", isActive, "consumerActive:", registry.isConsumerActive(functionName, scope))
+
 							// Read messages with INFINITE blocking (BLOCK 0) for instant response
 							const messages = await registry.readCallsInstant(blockingConnection, streamKey, groupName, consumerName)
 							logger.log("🚀 INSTANT: readCallsInstant returned with", messages.length, "messages")
 
-							if (!isActive) break // Check if we should stop
+							// Check if we should stop after reading messages
+							if (!isActive) {
+								logger.log("🚀 INSTANT: isActive is false, breaking from consumer loop")
+								break
+							}
+
+							if (!registry.isConsumerActive(functionName, scope)) {
+								logger.log("🚀 INSTANT: Consumer is no longer active, breaking from consumer loop")
+								break
+							}
 
 							if (messages.length > 0) {
 								logger.log("🚀 INSTANT: Message received INSTANTLY!")
 								logger.log("🚀 INSTANT: Processing", messages.length, "messages")
 							} else {
-								// If no messages and we're getting NOGROUP errors, add a small delay
-								// to prevent hammering Redis while the stream is being set up
+								logger.log("🚀 INSTANT: No messages received, continuing loop...")
+								// If no messages, add a small delay to prevent tight loops
+								// This can happen during stream recreation or when there are simply no messages
 								await new Promise((resolve) => setTimeout(resolve, 100))
+								logger.log("🚀 INSTANT: Delay complete, continuing to next iteration")
+								continue // Explicitly continue to next iteration
 							}
 
 							for (const message of messages) {
@@ -518,11 +534,19 @@ export class Function implements INodeType {
 						} catch (error) {
 							if (isActive) {
 								logger.error("🌊 Function: Error in instant consumer:", error)
+								logger.error("🌊 Function: Error details:", error.stack || error.message)
+								logger.log("🌊 Function: Consumer loop will continue after error recovery")
+
 								// Brief pause before retrying to avoid tight error loops
-								await new Promise((resolve) => setTimeout(resolve, 100))
+								await new Promise((resolve) => setTimeout(resolve, 1000))
+								logger.log("🌊 Function: Error recovery delay complete, continuing consumer loop")
+							} else {
+								logger.log("🌊 Function: Consumer is inactive, not recovering from error")
 							}
 						}
 					}
+
+					logger.log("🌊 Function: Consumer loop ended - isActive:", isActive, "consumerActive:", registry.isConsumerActive(functionName, scope))
 				} catch (error) {
 					logger.error("🌊 Function: Fatal error setting up instant consumer:", error)
 				} finally {

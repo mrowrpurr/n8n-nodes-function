@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-function",
-	"version": "0.1.9",
+	"version": "0.1.10",
 	"description": "Function nodes for n8n",
 	"keywords": [
 		"n8n-community-node-package"

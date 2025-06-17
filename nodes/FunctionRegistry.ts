@@ -801,11 +801,13 @@ class FunctionRegistry {
 			const messages = await blockingConnection.xReadGroup(groupName, consumerName, [{ key: streamKey, id: ">" }], { COUNT: 1, BLOCK: 0 })
 
 			if (!messages || messages.length === 0) {
+				logger.log("🚀 INSTANT: No messages returned from xReadGroup")
 				return []
 			}
 
 			const streamMessages = messages[0]
 			if (!streamMessages || !streamMessages.messages) {
+				logger.log("🚀 INSTANT: No stream messages in response")
 				return []
 			}
 
@@ -822,15 +824,26 @@ class FunctionRegistry {
 					const scope = streamKey.split(":")[2] // Extract scope from streamKey
 					await this.createStream(functionName, scope)
 					logger.log("🚀 INSTANT: Stream/group recreated successfully")
+
+					// Add a small delay to let the stream stabilize
+					await new Promise((resolve) => setTimeout(resolve, 100))
+					logger.log("🚀 INSTANT: Stream recreation delay complete, continuing loop")
 				} catch (recreateError) {
 					logger.error("🚀 INSTANT: Failed to recreate stream/group:", recreateError)
 				}
 
 				// Return empty array to continue the loop - the stream should be ready on next iteration
+				logger.log("🚀 INSTANT: Returning empty array to continue consumer loop after NOGROUP recovery")
 				return []
 			}
 
+			// For other errors, log but don't crash the consumer
 			logger.error("🚀 INSTANT: Error reading from stream:", error)
+			logger.log("🚀 INSTANT: Returning empty array to continue consumer loop after error")
+
+			// Add a small delay to prevent tight error loops
+			await new Promise((resolve) => setTimeout(resolve, 1000))
+
 			return []
 		}
 	}
