@@ -1,4 +1,4 @@
-> 🚧 Updating the README ... check back soon ... 🚧
+> 🚧 Beta Testing 🚧
 
 # 🧠 n8n-nodes-function <!-- omit from toc -->
 
