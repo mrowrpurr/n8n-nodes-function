@@ -230,9 +230,24 @@ class FunctionRegistry {
 		} catch (error: any) {
 			// Ignore "BUSYGROUP" error if group already exists
 			if (!error.message?.includes("BUSYGROUP")) {
-				throw error
+				logger.warn(`Error creating stream group, attempting to recreate: ${error.message}`)
+
+				// Try to recreate the group - this handles cases where the stream exists but group was destroyed
+				try {
+					// First ensure the stream exists
+					await this.client.xAdd(streamKey, "*", { init: "true" })
+					// Then create the group from the beginning
+					await this.client.xGroupCreate(streamKey, groupName, "0", { MKSTREAM: true })
+					logger.log(`Recreated stream group: ${streamKey} -> ${groupName}`)
+				} catch (recreateError: any) {
+					if (!recreateError.message?.includes("BUSYGROUP")) {
+						throw recreateError
+					}
+					logger.log(`Stream group recreated successfully: ${streamKey} -> ${groupName}`)
+				}
+			} else {
+				logger.log(`Stream group already exists: ${streamKey} -> ${groupName}`)
 			}
-			logger.log(`Stream group already exists: ${streamKey} -> ${groupName}`)
 		}
 
 		return streamKey
@@ -783,8 +798,19 @@ class FunctionRegistry {
 		} catch (error) {
 			// Check if this is a NOGROUP error (stream/group doesn't exist yet)
 			if (error.message && error.message.includes("NOGROUP")) {
-				logger.log("🚀 INSTANT: Stream/group not ready yet, will retry on next loop iteration")
-				// Return empty array to continue the loop - the stream will be created soon
+				logger.warn("🚀 INSTANT: NOGROUP error - stream/group was destroyed, attempting to recreate...")
+
+				// Try to recreate the stream and group
+				try {
+					const functionName = groupName.replace("group:", "")
+					const scope = streamKey.split(":")[2] // Extract scope from streamKey
+					await this.createStream(functionName, scope)
+					logger.log("🚀 INSTANT: Stream/group recreated successfully")
+				} catch (recreateError) {
+					logger.error("🚀 INSTANT: Failed to recreate stream/group:", recreateError)
+				}
+
+				// Return empty array to continue the loop - the stream should be ready on next iteration
 				return []
 			}
 
