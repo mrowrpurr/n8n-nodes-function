@@ -574,14 +574,30 @@ class FunctionRegistry {
 	}
 
 	/**
-	 * Get available workers for a function
+	 * Get available workers for a function with health check
 	 */
-	async getAvailableWorkers(functionName: string): Promise<string[]> {
+	async getAvailableWorkers(functionName: string, includeHealthCheck: boolean = false): Promise<string[]> {
 		try {
 			await this.ensureRedisConnection()
 			if (!this.client) return []
 
-			return await this.client.sMembers(`function:${functionName}`)
+			const workers = await this.client.sMembers(`function:${functionName}`)
+
+			if (!includeHealthCheck) {
+				return workers
+			}
+
+			// Filter to only healthy workers
+			const healthyWorkers = []
+			for (const workerId of workers) {
+				const isHealthy = await this.isWorkerHealthy(workerId, functionName, 30000)
+				if (isHealthy) {
+					healthyWorkers.push(workerId)
+				}
+			}
+
+			logger.log(`🔍 DIAGNOSTIC: Function ${functionName} has ${workers.length} total workers, ${healthyWorkers.length} healthy`)
+			return healthyWorkers
 		} catch (error) {
 			logger.error(`Error getting available workers:`, error)
 			return []
@@ -832,6 +848,175 @@ class FunctionRegistry {
 		} catch (error) {
 			logger.error("🚀 INSTANT: Error sending stop signal:", error)
 			throw error
+		}
+	}
+
+	/**
+	 * Recovery mechanism: Check if there are any active consumers for a stream
+	 */
+	async hasActiveConsumers(streamKey: string, groupName: string): Promise<boolean> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return false
+
+			// Check if consumer group exists and has active consumers
+			try {
+				const groups = await this.client.xInfoGroups(streamKey)
+				const targetGroup = groups.find((group: any) => group.name === groupName)
+
+				if (!targetGroup) {
+					logger.log(`🔍 RECOVERY: Consumer group does not exist: ${groupName}`)
+					return false
+				}
+
+				// Check if there are any consumers in the group
+				const consumers = await this.client.xInfoConsumers(streamKey, groupName)
+				const activeConsumers = consumers.filter((consumer: any) => {
+					// Consider a consumer active if it has been seen recently (within last 60 seconds)
+					const lastSeenMs = Date.now() - consumer.idle
+					return lastSeenMs < 60000 // 60 seconds
+				})
+
+				logger.log(`🔍 RECOVERY: Found ${consumers.length} total consumers, ${activeConsumers.length} active consumers`)
+				return activeConsumers.length > 0
+			} catch (groupError) {
+				logger.log(`🔍 RECOVERY: Error checking consumer group info: ${groupError.message}`)
+				return false
+			}
+		} catch (error) {
+			logger.error(`🔍 RECOVERY: Error checking active consumers:`, error)
+			return false
+		}
+	}
+
+	/**
+	 * Recovery mechanism: Check if there are healthy workers for a function
+	 */
+	async hasHealthyWorkers(functionName: string): Promise<{ hasHealthy: boolean; workerCount: number; healthyCount: number }> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return { hasHealthy: false, workerCount: 0, healthyCount: 0 }
+
+			// Get all workers for this function
+			const functionSetKey = `function:${functionName}`
+			const workers = await this.client.sMembers(functionSetKey)
+
+			let healthyCount = 0
+			for (const workerId of workers) {
+				const isHealthy = await this.isWorkerHealthy(workerId, functionName, 30000) // 30 second timeout
+				if (isHealthy) {
+					healthyCount++
+				}
+			}
+
+			logger.log(`🔍 RECOVERY: Function ${functionName} has ${workers.length} workers, ${healthyCount} healthy`)
+			return {
+				hasHealthy: healthyCount > 0,
+				workerCount: workers.length,
+				healthyCount,
+			}
+		} catch (error) {
+			logger.error(`🔍 RECOVERY: Error checking healthy workers:`, error)
+			return { hasHealthy: false, workerCount: 0, healthyCount: 0 }
+		}
+	}
+
+	/**
+	 * Recovery mechanism: Detect if a function call will hang due to missing consumers
+	 */
+	async detectMissingConsumer(functionName: string, scope: string): Promise<{ needsRecovery: boolean; reason: string }> {
+		const streamKey = `function:stream:${scope}:${functionName}`
+		const groupName = `group:${functionName}`
+
+		logger.log(`🔍 RECOVERY: Checking if function ${functionName} needs recovery...`)
+
+		// Check if stream exists
+		const streamExists = await this.client?.exists(streamKey)
+		if (!streamExists) {
+			return { needsRecovery: true, reason: "Stream does not exist" }
+		}
+
+		// Check if there are active consumers
+		const hasConsumers = await this.hasActiveConsumers(streamKey, groupName)
+		if (!hasConsumers) {
+			return { needsRecovery: true, reason: "No active consumers found" }
+		}
+
+		// Check if there are healthy workers
+		const { hasHealthy, workerCount, healthyCount } = await this.hasHealthyWorkers(functionName)
+		if (!hasHealthy) {
+			return { needsRecovery: true, reason: `No healthy workers (${healthyCount}/${workerCount} healthy)` }
+		}
+
+		logger.log(`🔍 RECOVERY: Function ${functionName} appears healthy`)
+		return { needsRecovery: false, reason: "Function appears healthy" }
+	}
+
+	/**
+	 * Recovery mechanism: Attempt to restart a function's consumer
+	 */
+	async attemptFunctionRecovery(functionName: string, scope: string): Promise<boolean> {
+		logger.log(`🚨 RECOVERY: Attempting to recover function ${functionName} in scope ${scope}`)
+
+		try {
+			const streamKey = `function:stream:${scope}:${functionName}`
+			const groupName = `group:${functionName}`
+
+			// First, try to recreate the stream and group
+			await this.createStream(functionName, scope)
+			logger.log(`🚨 RECOVERY: Stream recreated for ${functionName}`)
+
+			// Clear any orphaned messages
+			await this.clearPendingMessages(streamKey, groupName)
+			logger.log(`🚨 RECOVERY: Cleared orphaned messages for ${functionName}`)
+
+			// The actual consumer restart needs to happen in the Function node
+			// We can't restart it from here because the trigger function runs in the main process
+			logger.log(`🚨 RECOVERY: Recovery preparation complete for ${functionName}`)
+			logger.log(`🚨 RECOVERY: Note: Function node trigger must be restarted by n8n`)
+
+			return true
+		} catch (error) {
+			logger.error(`🚨 RECOVERY: Failed to recover function ${functionName}:`, error)
+			return false
+		}
+	}
+
+	/**
+	 * Recovery mechanism: Clean up stale worker metadata
+	 */
+	async cleanupStaleWorkers(functionName: string, maxAgeMs: number = 60000): Promise<number> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return 0
+
+			const functionSetKey = `function:${functionName}`
+			const workers = await this.client.sMembers(functionSetKey)
+			let cleanedCount = 0
+
+			for (const workerId of workers) {
+				const isHealthy = await this.isWorkerHealthy(workerId, functionName, maxAgeMs)
+				if (!isHealthy) {
+					// Remove stale worker from function set
+					await this.client.sRem(functionSetKey, workerId)
+
+					// Remove stale metadata
+					const metadataKey = `function:meta:${workerId}:${functionName}`
+					await this.client.del(metadataKey)
+
+					logger.log(`🧹 RECOVERY: Cleaned up stale worker ${workerId} for function ${functionName}`)
+					cleanedCount++
+				}
+			}
+
+			if (cleanedCount > 0) {
+				logger.log(`🧹 RECOVERY: Cleaned up ${cleanedCount} stale workers for function ${functionName}`)
+			}
+
+			return cleanedCount
+		} catch (error) {
+			logger.error(`🧹 RECOVERY: Error cleaning up stale workers:`, error)
+			return 0
 		}
 	}
 

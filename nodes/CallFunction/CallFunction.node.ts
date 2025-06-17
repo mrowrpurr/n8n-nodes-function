@@ -508,8 +508,64 @@ export class CallFunction implements INodeType {
 						}
 					}
 
+					// RECOVERY MECHANISM: If no healthy workers, attempt recovery
 					if (healthyWorkers.length === 0) {
-						throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available`)
+						logger.warn("🚨 RECOVERY: No healthy workers found, attempting recovery...")
+
+						// Clean up stale workers first
+						const cleanedCount = await registry.cleanupStaleWorkers(functionName, 30000) // 30 second timeout
+						logger.log(`🚨 RECOVERY: Cleaned up ${cleanedCount} stale workers`)
+
+						// Check if the function needs recovery
+						const recoveryCheck = await registry.detectMissingConsumer(functionName, targetScope)
+						logger.log(`🚨 RECOVERY: Recovery check result:`, recoveryCheck)
+
+						if (recoveryCheck.needsRecovery) {
+							logger.warn(`🚨 RECOVERY: Function needs recovery - ${recoveryCheck.reason}`)
+
+							// Attempt to recover the function
+							const recoverySuccess = await registry.attemptFunctionRecovery(functionName, targetScope)
+
+							if (recoverySuccess) {
+								logger.log("🚨 RECOVERY: Recovery attempt completed, waiting for function to restart...")
+
+								// Wait a bit for the function to potentially restart
+								await new Promise((resolve) => setTimeout(resolve, 2000))
+
+								// Check again for healthy workers
+								const newAvailableWorkers = await registry.getAvailableWorkers(functionName)
+								const newHealthyWorkers = []
+								for (const workerId of newAvailableWorkers) {
+									const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
+									if (isHealthy) {
+										newHealthyWorkers.push(workerId)
+									}
+								}
+
+								if (newHealthyWorkers.length > 0) {
+									logger.log("🚨 RECOVERY: Recovery successful! Found healthy workers:", newHealthyWorkers.length)
+									healthyWorkers.push(...newHealthyWorkers)
+								} else {
+									logger.error("🚨 RECOVERY: Recovery failed - still no healthy workers")
+									throw new NodeOperationError(
+										this.getNode(),
+										`Function '${functionName}' has no healthy workers available. Recovery attempted but failed. ` +
+											`This usually means the Function node trigger is not running. Try saving the workflow again or ` +
+											`deactivating and reactivating the workflow containing the Function node.`
+									)
+								}
+							} else {
+								logger.error("🚨 RECOVERY: Recovery attempt failed")
+								throw new NodeOperationError(
+									this.getNode(),
+									`Function '${functionName}' has no healthy workers available and recovery failed. ` +
+										`This usually means the Function node trigger is not running. Try saving the workflow again or ` +
+										`deactivating and reactivating the workflow containing the Function node.`
+								)
+							}
+						} else {
+							throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available. ${recoveryCheck.reason}`)
+						}
 					}
 
 					logger.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)

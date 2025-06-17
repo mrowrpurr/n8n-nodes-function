@@ -241,6 +241,7 @@ export class Function implements INodeType {
 			// Start the instant-response stream consumer with dedicated connection
 			let isActive = true
 			const controlChannel = `control:stop:${functionName}:${scope}:${consumerName}`
+			let recoveryCheckInterval: any = null
 
 			const processStreamMessages = async () => {
 				logger.log("🔄 RESTART: processStreamMessages() function called - consumer is starting!")
@@ -288,6 +289,33 @@ export class Function implements INodeType {
 					// Register this consumer as active now that it's fully ready
 					registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
 					logger.log("🚀 INSTANT: Consumer registered as active")
+
+					// Set up a recovery check interval to detect if this consumer becomes inactive
+					recoveryCheckInterval = setInterval(async () => {
+						try {
+							if (!isActive || !registry.isConsumerActive(functionName, scope)) {
+								logger.log("🔍 RECOVERY: Consumer is no longer active, clearing recovery check")
+								if (recoveryCheckInterval) {
+									clearInterval(recoveryCheckInterval)
+									recoveryCheckInterval = null
+								}
+								return
+							}
+
+							// Check if there are any pending messages that haven't been processed
+							// This could indicate the consumer is stuck or not processing messages
+							const recoveryCheck = await registry.detectMissingConsumer(functionName, scope)
+							if (recoveryCheck.needsRecovery) {
+								logger.warn(`🚨 RECOVERY: Function consumer may be stuck - ${recoveryCheck.reason}`)
+								// Don't attempt recovery here as it could interfere with the running consumer
+								// Just log the issue for debugging
+							}
+						} catch (error) {
+							logger.error("🔍 RECOVERY: Error during recovery check:", error)
+						}
+					}, 30000) // Check every 30 seconds
+
+					logger.log("🔍 RECOVERY: Recovery check interval started")
 
 					// Main consumer loop with instant response
 					logger.log("🚀 INSTANT: Starting main consumer loop")
@@ -498,6 +526,13 @@ export class Function implements INodeType {
 				} catch (error) {
 					logger.error("🌊 Function: Fatal error setting up instant consumer:", error)
 				} finally {
+					// Clean up recovery check interval
+					if (recoveryCheckInterval) {
+						clearInterval(recoveryCheckInterval)
+						recoveryCheckInterval = null
+						logger.log("🔍 RECOVERY: Recovery check interval cleared")
+					}
+
 					// Clean up connections
 					if (controlSubscriber) {
 						try {
@@ -541,6 +576,13 @@ export class Function implements INodeType {
 					// Stop the consumer loop
 					isActive = false
 					registry.stopConsumer(functionName, scope)
+
+					// Clean up recovery check interval
+					if (recoveryCheckInterval) {
+						clearInterval(recoveryCheckInterval)
+						recoveryCheckInterval = null
+						logger.log("🔍 RECOVERY: Recovery check interval cleared in closeFunction")
+					}
 
 					// Send stop signal to instant consumer
 					try {
