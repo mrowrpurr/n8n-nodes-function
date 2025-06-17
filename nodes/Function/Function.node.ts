@@ -29,22 +29,111 @@ export class Function implements INodeType {
 		},
 		properties: [
 			{
-				displayName: "Function Name",
-				name: "functionName",
-				type: "string",
-				default: "",
-				placeholder: "myFunction",
-				description: "The name of the function",
-				required: true,
+				displayName: "Parameters",
+				name: "parameters",
+				placeholder: "Add parameter",
+				type: "fixedCollection",
+				description: "Parameters that this function accepts",
+				typeOptions: {
+					multipleValues: true,
+					sortable: true,
+				},
+				default: {},
+				options: [
+					{
+						name: "parameter",
+						displayName: "Parameter",
+						values: [
+							{
+								displayName: "Default Value",
+								name: "defaultValue",
+								type: "string",
+								default: "",
+								placeholder: "Default value (optional)",
+								description: "Default value for this parameter",
+							},
+							{
+								displayName: "Description",
+								name: "description",
+								type: "string",
+								default: "",
+								placeholder: "Parameter description",
+								description: "Description of what this parameter does",
+							},
+							{
+								displayName: "Parameter Name",
+								name: "name",
+								type: "string",
+								default: "",
+								placeholder: "parameterName",
+								description: "Name of the parameter",
+								required: true,
+							},
+							{
+								displayName: "Required",
+								name: "required",
+								type: "boolean",
+								default: false,
+								description: "Whether this parameter is required",
+							},
+							{
+								displayName: "Type",
+								name: "type",
+								type: "options",
+								options: [
+									{
+										name: "Array",
+										value: "array",
+									},
+									{
+										name: "Boolean",
+										value: "boolean",
+									},
+									{
+										name: "Number",
+										value: "number",
+									},
+									{
+										name: "Object",
+										value: "object",
+									},
+									{
+										name: "String",
+										value: "string",
+									},
+								],
+								default: "string",
+								description: "Type of the parameter",
+							},
+						],
+					},
+				],
 			},
 		],
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
-		const functionName = this.getNodeParameter("functionName") as string
+		// Use the node name as the function name
+		const functionName = this.getNode().name
 
 		if (!functionName) {
-			throw new NodeOperationError(this.getNode(), "Function name is required")
+			throw new NodeOperationError(this.getNode(), "Function name is required (set the node name)")
+		}
+
+		// Extract parameter definitions
+		const parametersConfig = this.getNodeParameter("parameters") as any
+		const parameters = []
+
+		if (parametersConfig && parametersConfig.parameter) {
+			for (const param of parametersConfig.parameter) {
+				parameters.push({
+					name: param.name,
+					type: param.type,
+					required: param.required || false,
+					defaultValue: param.defaultValue || "",
+					description: param.description || "",
+				})
+			}
 		}
 
 		logger.log("🚀 FUNCTION: Starting Function node trigger")
@@ -97,7 +186,7 @@ export class Function implements INodeType {
 				name: functionName,
 				scope: workflowId,
 				code: "", // No code - this is a workflow trigger
-				parameters: [], // TODO: Extract parameters from workflow if needed
+				parameters: parameters, // Use extracted parameters
 				workflowId: workflowId,
 				nodeId: this.getNode().id,
 			})
