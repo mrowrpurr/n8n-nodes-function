@@ -37,31 +37,11 @@ export class Function implements INodeType {
 				description: "The name of the function",
 				required: true,
 			},
-			{
-				displayName: "Code",
-				name: "code",
-				type: "string",
-				typeOptions: {
-					editor: "codeNodeEditor",
-					editorLanguage: "javaScript",
-				},
-				default: `// Function code here
-// Input data is available as 'input'
-// Return the result
-
-return {
-	message: "Hello from function!",
-	input: input
-};`,
-				description: "The JavaScript code to execute",
-				noDataExpression: true,
-			},
 		],
 	}
 
 	async trigger(this: ITriggerFunctions): Promise<ITriggerResponse> {
 		const functionName = this.getNodeParameter("functionName") as string
-		const code = this.getNodeParameter("code") as string
 
 		if (!functionName) {
 			throw new NodeOperationError(this.getNode(), "Function name is required")
@@ -107,8 +87,9 @@ return {
 			}
 
 			// Create message handler
+			const emitFunction = this.emit.bind(this)
 			const messageHandler = async (messageData: any) => {
-				return await processMessage(messageData, code)
+				return await processMessage(messageData, emitFunction)
 			}
 
 			// Register function in registry so CallFunction can find it
@@ -116,8 +97,8 @@ return {
 			await registry.registerFunction({
 				name: functionName,
 				scope: workflowId,
-				code: code,
-				parameters: [], // TODO: Extract parameters from code if needed
+				code: "", // No code - this is a workflow trigger
+				parameters: [], // TODO: Extract parameters from workflow if needed
 				workflowId: workflowId,
 				nodeId: this.getNode().id,
 			})
@@ -217,9 +198,9 @@ return {
 }
 
 /**
- * Process a message from the Redis stream
+ * Process a message from the Redis stream by triggering workflow execution
  */
-async function processMessage(messageData: any, code: string): Promise<any> {
+async function processMessage(messageData: any, emitFunction: (data: INodeExecutionData[][]) => void): Promise<any> {
 	const startTime = Date.now()
 
 	try {
@@ -232,7 +213,7 @@ async function processMessage(messageData: any, code: string): Promise<any> {
 		}
 
 		// Parse message data
-		const { input, callId } = messageData
+		const { input, callId, item } = messageData
 
 		if (!callId) {
 			throw new NodeOperationError(null as any, "Message missing callId")
@@ -246,16 +227,38 @@ async function processMessage(messageData: any, code: string): Promise<any> {
 			throw new NodeOperationError(null as any, `Failed to parse input data: ${error}`)
 		}
 
-		// Execute the function code
-		const result = await executeFunction(code, parsedInput)
+		// Parse item data
+		let parsedItem
+		try {
+			parsedItem = typeof item === "string" ? JSON.parse(item) : item
+		} catch (error) {
+			throw new NodeOperationError(null as any, `Failed to parse item data: ${error}`)
+		}
 
-		// Send result back via Redis
-		await sendResult(callId, result, null)
+		// Create execution data with function call metadata
+		const executionData: INodeExecutionData[] = [
+			{
+				json: {
+					...parsedInput,
+					_functionCall: {
+						callId,
+						functionName: messageData.functionName,
+						timestamp: Date.now(),
+					},
+				},
+				pairedItem: parsedItem.pairedItem,
+			},
+		]
+
+		// Trigger workflow execution
+		logger.log("🚀 FUNCTION: Triggering workflow execution with callId:", callId)
+		emitFunction([executionData])
 
 		const processingTime = Date.now() - startTime
-		logger.log("🚀 FUNCTION: ✅ Message processed successfully in", processingTime, "ms")
+		logger.log("🚀 FUNCTION: ✅ Workflow triggered successfully in", processingTime, "ms")
 
-		return result
+		// Note: The actual result will be sent by ReturnFromFunction node
+		return { triggered: true, callId }
 	} catch (error) {
 		const processingTime = Date.now() - startTime
 		logger.error("🚀 FUNCTION: ❌ Error processing message:", error, "in", processingTime, "ms")
@@ -271,38 +274,6 @@ async function processMessage(messageData: any, code: string): Promise<any> {
 		}
 
 		throw error
-	}
-}
-
-/**
- * Execute the function code safely
- */
-async function executeFunction(code: string, input: any): Promise<any> {
-	try {
-		// Create a safe execution context
-		const context = {
-			input,
-			console: {
-				log: (...args: any[]) => logger.log("🚀 FUNCTION: [USER]", ...args),
-				error: (...args: any[]) => logger.error("🚀 FUNCTION: [USER]", ...args),
-				warn: (...args: any[]) => logger.log("🚀 FUNCTION: [USER] WARN:", ...args),
-				info: (...args: any[]) => logger.log("🚀 FUNCTION: [USER] INFO:", ...args),
-			},
-			// Add other safe globals as needed
-		}
-
-		// Create function with context
-		const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-		const func = new AsyncFunction("input", "console", code)
-
-		// Execute function
-		const result = await func(input, context.console)
-
-		logger.log("🚀 FUNCTION: Function executed successfully, result:", result)
-		return result
-	} catch (error) {
-		logger.error("🚀 FUNCTION: ❌ Error executing function code:", error)
-		throw new NodeOperationError(null as any, `Function execution failed: ${error}`)
 	}
 }
 
