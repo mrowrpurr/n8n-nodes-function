@@ -237,9 +237,6 @@ export class Function implements INodeType {
 				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
 
-			// Register this consumer
-			registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
-
 			// Start the instant-response stream consumer with dedicated connection
 			let isActive = true
 			const controlChannel = `control:stop:${functionName}:${scope}:${consumerName}`
@@ -275,6 +272,20 @@ export class Function implements INodeType {
 					} else {
 						logger.log("🚀 INSTANT: Stream is available, starting consumer loop")
 					}
+
+					// Clear any pending messages from previous failed executions
+					// This prevents processing orphaned messages when the workflow restarts
+					logger.log("🚀 INSTANT: Clearing any orphaned pending messages...")
+					await registry.clearPendingMessages(streamKey, groupName)
+
+					// Add a small delay to ensure the consumer is fully initialized
+					// This prevents race conditions when the function is edited and restarted
+					await new Promise((resolve) => setTimeout(resolve, 500))
+					logger.log("🚀 INSTANT: Consumer initialization delay complete")
+
+					// Register this consumer as active now that it's fully ready
+					registry.registerConsumer(functionName, scope, streamKey, groupName, consumerName)
+					logger.log("🚀 INSTANT: Consumer registered as active")
 
 					// Main consumer loop with instant response
 					logger.log("🚀 INSTANT: Starting main consumer loop")

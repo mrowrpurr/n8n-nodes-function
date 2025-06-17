@@ -646,6 +646,37 @@ class FunctionRegistry {
 	}
 
 	/**
+	 * Clear any pending messages for a consumer group to prevent processing orphaned messages
+	 */
+	async clearPendingMessages(streamKey: string, groupName: string): Promise<void> {
+		try {
+			await this.ensureRedisConnection()
+			if (!this.client) return
+
+			// Get pending messages
+			const pending = await this.client.xPending(streamKey, groupName)
+			logger.log(`🧹 CLEANUP: Found ${pending.pending} pending messages for ${groupName}`)
+
+			if (pending.pending > 0) {
+				// Get detailed pending info
+				const pendingDetails = await this.client.xPendingRange(streamKey, groupName, "-", "+", 100)
+
+				for (const message of pendingDetails) {
+					// Acknowledge each pending message to remove it
+					await this.client.xAck(streamKey, groupName, message.id)
+					logger.log(`🧹 CLEANUP: Acknowledged orphaned message ${message.id}`)
+				}
+
+				logger.log(`🧹 CLEANUP: Cleared ${pendingDetails.length} orphaned messages`)
+			} else {
+				logger.log(`🧹 CLEANUP: No pending messages to clear`)
+			}
+		} catch (error) {
+			logger.error(`🧹 CLEANUP: Error clearing pending messages:`, error)
+		}
+	}
+
+	/**
 	 * Wait for stream and consumer group to be available across all Redis connections
 	 */
 	async waitForStreamAvailable(streamKey: string, groupName: string, timeoutMs: number = 5000): Promise<boolean> {
