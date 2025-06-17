@@ -354,92 +354,170 @@ export class Function implements INodeType {
 							}
 
 							for (const message of messages) {
-								if (!isActive) break
+								if (!isActive) {
+									logger.log("🌊 Function: Consumer is inactive, breaking from message processing")
+									break
+								}
 
+								logger.log("🌊 Function: ===== STARTING MESSAGE PROCESSING =====")
+								logger.log("🌊 Function: Processing stream message:", message.id)
+								logger.log("🌊 Function: Raw message object:", JSON.stringify(message, null, 2))
+
+								// Wrap entire message processing in comprehensive error handling
 								try {
-									logger.log("🌊 Function: Processing stream message:", message.id)
+									logger.log("🌊 Function: Entering main message processing try block...")
+									// Parse message fields with individual error handling
+									logger.log("🌊 Function: Parsing message fields...")
 
-									// Parse message fields
-									const callId = message.message.callId
-									const params = JSON.parse(message.message.params)
-									const inputItem = JSON.parse(message.message.inputItem)
-									const responseChannel = message.message.responseChannel
+									let callId, params, inputItem, responseChannel
 
-									logger.log("🌊 Function: Call ID:", callId)
-									logger.log("🌊 Function: Parameters:", params)
-
-									// Process parameters according to function definition
-									const locals: Record<string, any> = {}
-
-									for (const param of parameterList) {
-										const paramName = param.name
-										const paramType = param.type
-										const required = param.required
-										const defaultValue = param.defaultValue
-
-										let value = params[paramName]
-										logger.log("🌊 Function: Processing parameter", paramName, "=", value)
-
-										// Handle required parameters
-										if (required && (value === undefined || value === null)) {
-											throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
-										}
-
-										// Use default value if not provided
-										if (value === undefined || value === null) {
-											if (defaultValue !== "") {
-												try {
-													// Try to parse default value based on type
-													switch (paramType) {
-														case "number":
-															value = Number(defaultValue)
-															break
-														case "boolean":
-															value = defaultValue.toLowerCase() === "true"
-															break
-														case "object":
-														case "array":
-															value = JSON.parse(defaultValue)
-															break
-														default:
-															value = defaultValue
-													}
-												} catch (error) {
-													value = defaultValue // Fall back to string if parsing fails
-												}
-											}
-										}
-
-										locals[paramName] = value
+									try {
+										callId = message.message.callId
+										logger.log("🌊 Function: ✅ Call ID extracted:", callId)
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error extracting callId:", error)
+										throw new NodeOperationError(this.getNode(), `Failed to extract callId: ${error.message}`)
 									}
 
-									logger.log("🌊 Function: Final locals =", locals)
+									try {
+										responseChannel = message.message.responseChannel
+										logger.log("🌊 Function: ✅ Response channel extracted:", responseChannel)
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error extracting responseChannel:", error)
+										throw new NodeOperationError(this.getNode(), `Failed to extract responseChannel: ${error.message}`)
+									}
+
+									try {
+										logger.log("🌊 Function: Parsing params JSON:", message.message.params)
+										params = JSON.parse(message.message.params)
+										logger.log("🌊 Function: ✅ Parameters parsed:", params)
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error parsing params JSON:", error)
+										logger.error("🌊 Function: Raw params string:", message.message.params)
+										throw new NodeOperationError(this.getNode(), `Failed to parse params JSON: ${error.message}`)
+									}
+
+									try {
+										logger.log("🌊 Function: Parsing inputItem JSON:", message.message.inputItem)
+										inputItem = JSON.parse(message.message.inputItem)
+										logger.log("🌊 Function: ✅ Input item parsed:", inputItem)
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error parsing inputItem JSON:", error)
+										logger.error("🌊 Function: Raw inputItem string:", message.message.inputItem)
+										throw new NodeOperationError(this.getNode(), `Failed to parse inputItem JSON: ${error.message}`)
+									}
+
+									logger.log("🌊 Function: ✅ All message fields parsed successfully")
+									logger.log("🌊 Function: Call ID:", callId)
+									logger.log("🌊 Function: Parameters:", params)
+									logger.log("🌊 Function: Input item:", inputItem)
+									logger.log("🌊 Function: Response channel:", responseChannel)
+
+									// Process parameters according to function definition
+									logger.log("🌊 Function: Starting parameter processing...")
+									logger.log("🌊 Function: Parameter list:", parameterList)
+
+									const locals: Record<string, any> = {}
+
+									try {
+										for (const param of parameterList) {
+											logger.log("🌊 Function: Processing parameter definition:", param)
+
+											const paramName = param.name
+											const paramType = param.type
+											const required = param.required
+											const defaultValue = param.defaultValue
+
+											let value = params[paramName]
+											logger.log("🌊 Function: Processing parameter", paramName, "=", value, "type:", paramType, "required:", required)
+
+											// Handle required parameters
+											if (required && (value === undefined || value === null)) {
+												logger.error("🌊 Function: ❌ Required parameter missing:", paramName)
+												throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+											}
+
+											// Use default value if not provided
+											if (value === undefined || value === null) {
+												if (defaultValue !== "") {
+													logger.log("🌊 Function: Using default value for", paramName, ":", defaultValue)
+													try {
+														// Try to parse default value based on type
+														switch (paramType) {
+															case "number":
+																value = Number(defaultValue)
+																logger.log("🌊 Function: ✅ Parsed number default:", value)
+																break
+															case "boolean":
+																value = defaultValue.toLowerCase() === "true"
+																logger.log("🌊 Function: ✅ Parsed boolean default:", value)
+																break
+															case "object":
+															case "array":
+																value = JSON.parse(defaultValue)
+																logger.log("🌊 Function: ✅ Parsed object/array default:", value)
+																break
+															default:
+																value = defaultValue
+																logger.log("🌊 Function: ✅ Using string default:", value)
+														}
+													} catch (error) {
+														logger.warn("🌊 Function: ⚠️ Failed to parse default value, using as string:", error.message)
+														value = defaultValue // Fall back to string if parsing fails
+													}
+												} else {
+													logger.log("🌊 Function: No default value for", paramName, ", using undefined")
+												}
+											}
+
+											locals[paramName] = value
+											logger.log("🌊 Function: ✅ Parameter", paramName, "processed, final value:", value)
+										}
+
+										logger.log("🌊 Function: ✅ All parameters processed successfully")
+										logger.log("🌊 Function: Final locals =", locals)
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error during parameter processing:", error)
+										throw error // Re-throw to be caught by outer error handler
+									}
 
 									// Create the output item
-									let outputItem: INodeExecutionData = {
-										json: {
-											...inputItem.json,
-											...locals,
-											_functionCall: {
-												callId,
-												functionName,
-												timestamp: Date.now(),
-												// Embed call context for ReturnFromFunction
-												responseChannel,
-												messageId: message.id,
-												streamKey,
-												groupName,
+									logger.log("🌊 Function: Creating output item...")
+									let outputItem: INodeExecutionData
+
+									try {
+										outputItem = {
+											json: {
+												...inputItem.json,
+												...locals,
+												_functionCall: {
+													callId,
+													functionName,
+													timestamp: Date.now(),
+													// Embed call context for ReturnFromFunction
+													responseChannel,
+													messageId: message.id,
+													streamKey,
+													groupName,
+												},
 											},
-										},
-										index: 0,
-										binary: inputItem.binary,
+											index: 0,
+											binary: inputItem.binary,
+										}
+										logger.log("🌊 Function: ✅ Output item created successfully")
+										logger.log("🌊 Function: Output item JSON keys:", Object.keys(outputItem.json))
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error creating output item:", error)
+										throw new NodeOperationError(this.getNode(), `Failed to create output item: ${error.message}`)
 									}
 
 									// Execute user code if enabled
 									if (enableCode && code.trim()) {
-										logger.log("🌊 Function: Executing JavaScript code")
+										logger.log("🌊 Function: JavaScript code execution enabled")
+										logger.log("🌊 Function: Code length:", code.length, "characters")
 
 										try {
+											logger.log("🌊 Function: Setting up execution context...")
 											// Execute JavaScript code with parameters as global variables
 											const context = {
 												...locals,
@@ -450,7 +528,9 @@ export class Function implements INodeType {
 													warn: (...args: any[]) => logger.warn("🌊 Function Code:", ...args),
 												},
 											}
+											logger.log("🌊 Function: ✅ Context created with keys:", Object.keys(context))
 
+											logger.log("🌊 Function: Wrapping user code...")
 											// Execute JavaScript code directly (n8n already provides sandboxing)
 											const wrappedCode = `
 											(function() {
@@ -463,56 +543,93 @@ export class Function implements INodeType {
 												${code}
 											})
 										`
+											logger.log("🌊 Function: ✅ Code wrapped successfully")
 
+											logger.log("🌊 Function: Executing user code...")
 											const result = eval(wrappedCode)(context)
-
+											logger.log("🌊 Function: ✅ Code execution completed")
 											logger.log("🌊 Function: Code execution result =", result)
 
 											// If code returns a value, merge it with locals
 											if (result !== undefined) {
+												logger.log("🌊 Function: Processing code result...")
 												if (typeof result === "object" && result !== null) {
+													logger.log("🌊 Function: Merging object result into output item")
 													// Merge locals (parameters) first, then returned object (returned object wins conflicts)
 													outputItem.json = {
 														...outputItem.json,
 														...result,
 													}
+													logger.log("🌊 Function: ✅ Object result merged")
 												} else {
+													logger.log("🌊 Function: Adding non-object result to output item")
 													// For non-object returns, include the result
 													outputItem.json = {
 														...outputItem.json,
 														result,
 													}
+													logger.log("🌊 Function: ✅ Non-object result added")
 												}
+											} else {
+												logger.log("🌊 Function: Code returned undefined, no result to merge")
 											}
 										} catch (error) {
-											logger.error("🌊 Function: Code execution error:", error)
+											logger.error("🌊 Function: ❌ Code execution error:", error)
+											logger.error("🌊 Function: Error stack:", error.stack)
 											outputItem.json = {
 												...outputItem.json,
 												_codeError: error.message,
 											}
+											logger.log("🌊 Function: ⚠️ Code error added to output item")
 										}
+									} else {
+										logger.log("🌊 Function: No JavaScript code to execute")
 									}
 
-									logger.log("🌊 Function: Emitting output item:", outputItem)
+									logger.log("🌊 Function: Preparing to emit output item...")
+									logger.log("🌊 Function: Final output item:", JSON.stringify(outputItem, null, 2))
 
-									// Emit the item to continue the workflow
-									this.emit([[outputItem]])
+									try {
+										// Emit the item to continue the workflow
+										logger.log("🌊 Function: Emitting output item to workflow...")
+										this.emit([[outputItem]])
+										logger.log("🌊 Function: ✅ Output item emitted successfully")
+									} catch (error) {
+										logger.error("🌊 Function: ❌ Error emitting output item:", error)
+										throw new NodeOperationError(this.getNode(), `Failed to emit output item: ${error.message}`)
+									}
 
 									// Function execution complete - ReturnFromFunction node is responsible for sending response
-									logger.log("🌊 Function: Function execution completed, waiting for ReturnFromFunction node")
+									logger.log("🌊 Function: ✅ Function execution completed successfully")
 									logger.log("🌊 Function: Response channel:", responseChannel)
 									logger.log("🌊 Function: Call ID:", callId)
+									logger.log("🌊 Function: Message ID:", message.id)
 									logger.log("🌊 Function: Note: Function will wait FOREVER until ReturnFromFunction sends response")
+									logger.log("🌊 Function: ===== MESSAGE PROCESSING COMPLETE =====")
 
 									// Don't acknowledge the message here - ReturnFromFunction will do it
 									// The consumer loop will continue to handle more function calls
 								} catch (error) {
-									logger.error("🌊 Function: Error processing message:", error)
+									logger.error("🌊 Function: ❌ ERROR DURING MESSAGE PROCESSING:", error)
+									logger.error("🌊 Function: Error type:", error.constructor.name)
+									logger.error("🌊 Function: Error message:", error.message)
+									logger.error("🌊 Function: Error stack:", error.stack)
+									logger.log("🌊 Function: Message that caused error:", JSON.stringify(message, null, 2))
 
 									// Send error response
 									try {
-										const callId = message.message.callId
-										const responseChannel = message.message.responseChannel
+										logger.log("🌊 Function: Attempting to send error response...")
+
+										let callId, responseChannel
+										try {
+											callId = message.message.callId
+											responseChannel = message.message.responseChannel
+											logger.log("🌊 Function: ✅ Extracted error response details - callId:", callId, "responseChannel:", responseChannel)
+										} catch (extractError) {
+											logger.error("🌊 Function: ❌ Failed to extract response details:", extractError)
+											logger.log("🌊 Function: Cannot send error response, continuing to next message")
+											continue // Skip to next message if we can't extract response details
+										}
 
 										await registry.publishResponse(responseChannel, {
 											success: false,
@@ -520,21 +637,33 @@ export class Function implements INodeType {
 											callId,
 											timestamp: Date.now(),
 										})
+										logger.log("🌊 Function: ✅ Error response sent successfully")
 
 										// Acknowledge the message even on error to prevent reprocessing
 										await registry.acknowledgeCall(streamKey, groupName, message.id)
+										logger.log("🌊 Function: ✅ Message acknowledged after error")
 
 										logger.log("🔍 DIAGNOSTIC: Error occurred, sending error response")
 										logger.log("🔍 DIAGNOSTIC: This is the ONLY time Function sends responses!")
 									} catch (responseError) {
-										logger.error("🌊 Function: Error sending error response:", responseError)
+										logger.error("🌊 Function: ❌ Error sending error response:", responseError)
+										logger.error("🌊 Function: Response error stack:", responseError.stack)
+										logger.log("🌊 Function: Continuing to next message despite response error")
 									}
+
+									logger.log("🌊 Function: ===== ERROR HANDLING COMPLETE, CONTINUING TO NEXT MESSAGE =====")
 								}
 							}
+
+							logger.log("🌊 Function: ===== COMPLETED PROCESSING ALL MESSAGES IN BATCH =====")
+							logger.log("🌊 Function: Continuing to next loop iteration...")
 						} catch (error) {
 							if (isActive) {
-								logger.error("🌊 Function: Error in instant consumer:", error)
-								logger.error("🌊 Function: Error details:", error.stack || error.message)
+								logger.error("🌊 Function: ❌ CRITICAL ERROR in instant consumer loop:", error)
+								logger.error("🌊 Function: Error type:", error.constructor.name)
+								logger.error("🌊 Function: Error message:", error.message)
+								logger.error("🌊 Function: Error stack:", error.stack || error.message)
+								logger.log("🌊 Function: This error occurred outside of message processing")
 								logger.log("🌊 Function: Consumer loop will continue after error recovery")
 
 								// Brief pause before retrying to avoid tight error loops
