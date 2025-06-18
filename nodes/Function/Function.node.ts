@@ -173,6 +173,18 @@ export class Function implements INodeType {
 			}
 		}
 
+		// Clean up any zombie workers from previous runs before starting
+		try {
+			const registry = await getEnhancedFunctionRegistry()
+			const cleanedCount = await registry.cleanupStaleWorkers(functionName)
+			if (cleanedCount > 0) {
+				logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} zombie workers on startup`)
+			}
+		} catch (error) {
+			logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up zombie workers on startup:", error)
+			// Don't fail startup if cleanup fails
+		}
+
 		let lifecycleManager: ConsumerLifecycleManager | null = null
 		let registry: any = null
 		let workerId: string | null = null
@@ -265,14 +277,33 @@ export class Function implements INodeType {
 							logger.log("🚀 FUNCTION: ✅ Health updates stopped")
 						}
 
+						// Enhanced zombie worker cleanup - clean up ALL stale workers for this function
+						// This prevents accumulation of zombie workers from previous runs
+						if (registry) {
+							try {
+								const cleanedCount = await registry.cleanupStaleWorkers(functionName)
+								if (cleanedCount > 0) {
+									logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} zombie workers during shutdown`)
+								}
+							} catch (cleanupError) {
+								logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up zombie workers:", cleanupError)
+							}
+
+							// Clean up current worker registration to prevent zombie workers
+							// This is critical - without this, dead workers stay in registry and cause timeouts
+							if (workerId) {
+								await registry.unregisterWorker(workerId, functionName)
+								logger.log("🚀 FUNCTION: ✅ Current worker unregistered to prevent zombie workers")
+							}
+						}
+
 						// Stop the lifecycle manager - cleanly shuts down Redis consumer
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
 							logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager stopped")
 						}
 
-						// That's it! No registry unregistration, no permanent state changes
-						// n8n will restart us by calling trigger() again when needed
+						// Note: We don't unregister the function itself - n8n will restart us
 						logger.log("🚀 FUNCTION: ✅ Clean shutdown complete - ready for restart")
 					} catch (error) {
 						logger.error("🚀 FUNCTION: ❌ Error during clean shutdown:", error)

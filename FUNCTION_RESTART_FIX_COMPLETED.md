@@ -2,29 +2,39 @@
 
 ## Problem Solved
 
-Fixed the critical issue where Function nodes would permanently shut down when workflow structure changed (like adding CallFunction nodes), causing "Function not ready after 10000ms" timeout errors.
+Fixed the critical issue where Function nodes would create "zombie workers" after workflow saves, causing CallFunction nodes to timeout with "Function not ready after 10000ms" errors.
 
-## Root Cause
+## Root Cause Analysis
 
-Our Function node's `closeFunction` was doing **permanent shutdown** when n8n expected **clean, restartable shutdown**:
+**Initial Problem:** Function node's `closeFunction` was doing permanent shutdown when n8n expected restartable shutdown.
 
-❌ **Before (Broken):**
-- Marked workers as permanently unhealthy
-- Unregistered from function registry  
-- Complex shutdown coordination
-- **Result:** Not restartable when n8n called `trigger()` again
+**Secondary Problem (Discovered):** Our lightweight fix stopped health updates but didn't clean up worker registrations, creating "zombie workers" that appeared available but were actually dead.
 
-✅ **After (Fixed):**
-- Only stops health updates and lifecycle manager
-- No registry unregistration
-- Lightweight, Redis-style cleanup
-- **Result:** Clean, restartable shutdown
+**Log Evidence:** In `wont-run-after-a-few-saves.log` line 1145:
+```
+🎯🎯🎯 COORDINATOR: Worker Test Fn-CmaJH8LPpTrXUENt-1750259869165-5x80xv4tj healthy: false
+```
+CallFunction found 2 workers but the newer one was marked unhealthy (zombie), causing it to fall back to older workers or timeout.
+
+## Evolution of the Fix
+
+❌ **Original (Broken):**
+- Permanent shutdown with full registry cleanup
+- **Result:** Function couldn't restart
+
+⚠️ **First Fix (Incomplete):**
+- Lightweight shutdown with no registry cleanup
+- **Result:** Function restarted but left zombie workers
+
+✅ **Final Fix (Complete):**
+- Lightweight shutdown with worker cleanup only
+- **Result:** Clean restart without zombie workers
 
 ## Changes Made
 
 ### File: `nodes/Function/Function.node.ts`
 
-#### 1. Fixed closeFunction (lines 257-277)
+#### 1. Fixed closeFunction (lines 257-283)
 ```typescript
 closeFunction: async () => {
     logger.log("🚀 FUNCTION: Starting clean shutdown...")
@@ -36,14 +46,20 @@ closeFunction: async () => {
         logger.log("🚀 FUNCTION: ✅ Health updates stopped")
     }
 
+    // Clean up worker registration to prevent zombie workers
+    // This is critical - without this, dead workers stay in registry and cause timeouts
+    if (workerId && registry) {
+        await registry.unregisterWorker(workerId, functionName)
+        logger.log("🚀 FUNCTION: ✅ Worker unregistered to prevent zombie workers")
+    }
+
     // Stop the lifecycle manager - cleanly shuts down Redis consumer
     if (lifecycleManager) {
         await lifecycleManager.stop()
         logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager stopped")
     }
 
-    // That's it! No registry unregistration, no permanent state changes
-    // n8n will restart us by calling trigger() again when needed
+    // Note: We don't unregister the function itself - n8n will restart us
     logger.log("🚀 FUNCTION: ✅ Clean shutdown complete - ready for restart")
 }
 ```
@@ -62,10 +78,15 @@ closeFunction: async () => {
 ### Normal Workflow Flow
 1. **Function starts** → Registers in registry, starts consumer, becomes healthy
 2. **User adds CallFunction** → n8n calls our `closeFunction` (expecting restart)
-3. **Our closeFunction** → Stops health updates and lifecycle manager only
+3. **Our closeFunction** → Stops health updates, unregisters worker, stops lifecycle manager
 4. **n8n restarts Function** → Calls `trigger()` again, Function starts up clean
-5. **CallFunction tries to call** → Finds healthy Function worker
+5. **CallFunction tries to call** → Finds healthy Function worker (no zombies!)
 6. **CallFunction succeeds** → No more timeout errors!
+
+### Key Insight: Zombie Worker Prevention
+The critical fix was adding worker cleanup to prevent "zombie workers":
+- **Without worker cleanup:** Dead workers stay in registry, CallFunction finds them first, times out
+- **With worker cleanup:** Dead workers removed, CallFunction only finds healthy workers
 
 ### Expected Log Flow
 ```
