@@ -38,6 +38,27 @@ export class WorkerCoordinator {
 	}
 
 	/**
+	 * Extract timestamp from worker ID
+	 * Worker ID format: FunctionName-WorkflowId-Timestamp-RandomId
+	 */
+	private extractTimestampFromWorkerId(workerId: string): number {
+		try {
+			// Split by '-' and get the third part (timestamp)
+			const parts = workerId.split("-")
+			if (parts.length >= 3) {
+				const timestamp = parseInt(parts[2])
+				if (!isNaN(timestamp)) {
+					return timestamp
+				}
+			}
+		} catch (error) {
+			logger.log(`🎯 COORDINATOR: Warning - could not extract timestamp from worker ID: ${workerId}`)
+		}
+		// Fallback to 0 if extraction fails (will be sorted last)
+		return 0
+	}
+
+	/**
 	 * Register worker and notify readiness instantly
 	 */
 	async registerWorkerWithNotification(workerId: string, functionName: string, workflowId: string): Promise<void> {
@@ -101,8 +122,19 @@ export class WorkerCoordinator {
 
 		if (workers.length > 0) {
 			console.log(`🎯🎯🎯 COORDINATOR: Checking worker health...`)
-			// Check if any worker is healthy
-			for (const workerId of workers) {
+
+			// Sort workers by timestamp (newest first) to check latest workers first
+			const sortedWorkers = workers.sort((a, b) => {
+				// Extract timestamp from worker ID format: FunctionName-WorkflowId-Timestamp-RandomId
+				const timestampA = this.extractTimestampFromWorkerId(a)
+				const timestampB = this.extractTimestampFromWorkerId(b)
+				return timestampB - timestampA // Newest first
+			})
+
+			console.log(`🎯🎯🎯 COORDINATOR: Sorted workers (newest first):`, sortedWorkers)
+
+			// Check if any worker is healthy (starting with newest)
+			for (const workerId of sortedWorkers) {
 				console.log(`🎯🎯🎯 COORDINATOR: Checking health of worker: ${workerId}`)
 				const isHealthy = await this.registry.isWorkerHealthy(workerId, functionName)
 				console.log(`🎯🎯🎯 COORDINATOR: Worker ${workerId} healthy: ${isHealthy}`)

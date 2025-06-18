@@ -177,7 +177,6 @@ export class Function implements INodeType {
 		let registry: any = null
 		let workerId: string | null = null
 		let healthUpdateInterval: NodeJS.Timeout | null = null
-		let workerStartTime: number = Date.now()
 
 		try {
 			// Get Redis configuration
@@ -255,134 +254,55 @@ export class Function implements INodeType {
 
 			return {
 				closeFunction: async () => {
-					// BELT-AND-SUSPENDERS: Check minimum lifetime and debounce
-					const uptime = Date.now() - workerStartTime
-					if (uptime < 1000) {
-						logger.log(`🔒 PREVENTION: Ignoring shutdown - worker uptime ${uptime}ms < 1000ms minimum`)
-						return
-					}
-
-					logger.log("🔒 PREVENTION: Starting Function node shutdown sequence...")
-					logger.log(`🔒 PREVENTION: Shutting down function: ${functionName}, worker: ${workerId}`)
+					logger.log("🚀 FUNCTION: Starting clean shutdown...")
+					logger.log(`🚀 FUNCTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
-						// STEP 1: Immediately mark worker as unhealthy to prevent new calls
-						logger.log("🔒 PREVENTION: Step 1 - Immediately marking worker as unhealthy")
-						if (workerId && registry instanceof EnhancedFunctionRegistry) {
-							await registry.notifyWorkerHealth(functionName, workflowId, workerId, false, "shutdown-starting")
-							logger.log("🔒 PREVENTION: ✅ Worker marked as unhealthy - CallFunction nodes will avoid this worker")
-						}
-
-						// STEP 2: Stop health updates to prevent re-marking as healthy
-						logger.log("🔒 PREVENTION: Step 2 - Stopping health updates to signal unavailability")
+						// Stop health updates - prevents worker from being marked healthy during shutdown
 						if (healthUpdateInterval) {
 							clearInterval(healthUpdateInterval)
 							healthUpdateInterval = null
-							logger.log("🔒 PREVENTION: ✅ Worker health updates stopped")
+							logger.log("🚀 FUNCTION: ✅ Health updates stopped")
 						}
 
-						// STEP 3: Stop the lifecycle manager to stop consuming messages
-						logger.log("🔒 PREVENTION: Step 3 - Stopping consumer lifecycle manager")
+						// Stop the lifecycle manager - cleanly shuts down Redis consumer
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
-							logger.log("🔒 PREVENTION: ✅ Consumer lifecycle manager stopped")
+							logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager stopped")
 						}
 
-						// STEP 4: Wait a moment for any in-flight messages to complete
-						logger.log("🔒 PREVENTION: Step 4 - Waiting 2 seconds for in-flight messages to complete")
-						await new Promise((resolve) => setTimeout(resolve, 2000))
-
-						// STEP 5: Use enhanced coordinator for graceful shutdown
-						if (workerId && registry instanceof EnhancedFunctionRegistry) {
-							logger.log("🔒 PREVENTION: Step 5 - Using enhanced coordinator for graceful shutdown")
-							await registry.coordinateShutdown(functionName, workflowId, workerId)
-							logger.log("🔒 PREVENTION: ✅ Coordinated shutdown complete")
-						} else if (workerId && registry) {
-							// Fallback to original shutdown sequence
-							logger.log("🔒 PREVENTION: Step 5 - Using standard shutdown (fallback)")
-
-							const diagnostics = await registry.listAllWorkersAndFunctions()
-							const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
-							logger.log(`🔒 PREVENTION: Found ${myWorkers.length} total workers for function ${functionName}:`)
-							myWorkers.forEach((w: any) => {
-								logger.log(`🔒 PREVENTION:   - Worker ${w.workerId}: ${w.isHealthy ? "healthy" : "stale"} (last seen: ${w.lastSeen})`)
-							})
-
-							// Unregister this specific worker
-							await registry.unregisterWorker(workerId, functionName)
-							logger.log("🔒 PREVENTION: ✅ Worker unregistered:", workerId)
-
-							// Wait before function cleanup
-							await new Promise((resolve) => setTimeout(resolve, 1000))
-
-							// Unregister function from registry
-							await registry.unregisterFunction(functionName, workflowId)
-							logger.log("🔒 PREVENTION: ✅ Function unregistered:", functionName)
-						}
-
-						// DON'T shutdown the connection manager here - it's shared!
-						// The connection manager is a singleton and may be used by other nodes
-						logger.log("🔒 PREVENTION: ✅ Function node shutdown sequence completed successfully")
+						// That's it! No registry unregistration, no permanent state changes
+						// n8n will restart us by calling trigger() again when needed
+						logger.log("🚀 FUNCTION: ✅ Clean shutdown complete - ready for restart")
 					} catch (error) {
-						logger.error("🔒 PREVENTION: ❌ Error during shutdown sequence:", error)
-
-						// Emergency cleanup - try to unregister even if other steps failed
-						try {
-							if (workerId && registry) {
-								await registry.unregisterWorker(workerId, functionName)
-								logger.log("🔒 PREVENTION: ✅ Emergency worker cleanup completed")
-							}
-							if (registry) {
-								await registry.unregisterFunction(functionName, workflowId)
-								logger.log("🔒 PREVENTION: ✅ Emergency function cleanup completed")
-							}
-						} catch (emergencyError) {
-							logger.error("🔒 PREVENTION: ❌ Emergency cleanup also failed:", emergencyError)
-						}
+						logger.error("🚀 FUNCTION: ❌ Error during clean shutdown:", error)
+						// Even if cleanup fails, don't prevent n8n from restarting us
 					}
 				},
 			}
 		} catch (error) {
-			logger.error("🔒 PREVENTION: ❌ Failed to start Function node:", error)
+			logger.error("🚀 FUNCTION: ❌ Failed to start Function node:", error)
 
-			// Enhanced cleanup on error with prevention logging
+			// Clean up any resources that were created before the error
 			try {
-				logger.log("🔒 PREVENTION: Starting error cleanup sequence...")
+				logger.log("🚀 FUNCTION: Starting error cleanup...")
 
 				// Stop health updates
 				if (healthUpdateInterval) {
 					clearInterval(healthUpdateInterval)
 					healthUpdateInterval = null
-					logger.log("🔒 PREVENTION: ✅ Health updates stopped during error cleanup")
+					logger.log("🚀 FUNCTION: ✅ Health updates stopped during error cleanup")
 				}
 
-				// Stop lifecycle manager first
+				// Stop lifecycle manager
 				if (lifecycleManager) {
 					await lifecycleManager.stop()
-					logger.log("🔒 PREVENTION: ✅ Lifecycle manager stopped during error cleanup")
+					logger.log("🚀 FUNCTION: ✅ Lifecycle manager stopped during error cleanup")
 				}
 
-				// Check for any workers that might have been created
-				if (workerId && registry) {
-					logger.log("🔒 PREVENTION: Checking for workers to clean up during error...")
-					const diagnostics = await registry.listAllWorkersAndFunctions()
-					const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
-					logger.log(`🔒 PREVENTION: Found ${myWorkers.length} workers for function ${functionName} during error cleanup`)
-
-					await registry.unregisterWorker(workerId, functionName)
-					logger.log("🔒 PREVENTION: ✅ Worker unregistered during error cleanup:", workerId)
-				}
-
-				// Clean up function registration if it was created
-				if (registry && functionName) {
-					await registry.unregisterFunction(functionName, this.getWorkflow().id || "unknown")
-					logger.log("🔒 PREVENTION: ✅ Function unregistered during error cleanup:", functionName)
-				}
-
-				// DON'T shutdown connection manager on error - it's shared!
-				logger.log("🔒 PREVENTION: ✅ Error cleanup sequence completed")
+				logger.log("🚀 FUNCTION: ✅ Error cleanup completed")
 			} catch (cleanupError) {
-				logger.error("🔒 PREVENTION: ❌ Error during cleanup:", cleanupError)
+				logger.error("🚀 FUNCTION: ❌ Error during cleanup:", cleanupError)
 			}
 
 			throw new NodeOperationError(this.getNode(), `Failed to start function: ${error}`)
