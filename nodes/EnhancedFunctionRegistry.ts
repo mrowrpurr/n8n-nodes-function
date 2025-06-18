@@ -96,6 +96,12 @@ export class EnhancedFunctionRegistry extends FunctionRegistry {
 		await this.addCall(streamKey, callId, functionName, parameters, item, responseChannel)
 		console.log(`🚀🚀🚀 ENHANCED: Call added to stream successfully`)
 
+		console.log(`🚀🚀🚀 ENHANCED: Sending wake-up notification to Function nodes...`)
+		// Send wake-up notification to instantly alert Function nodes of new work
+		await this.notificationManager.publishWakeUp(functionName, callId)
+		console.log(`🚀🚀🚀 ENHANCED: Wake-up notification sent - Function nodes should check immediately`)
+		logger.log(`🚀 ENHANCED: Wake-up published for ${functionName} call ${callId}`)
+
 		console.log(`🚀🚀🚀 ENHANCED: About to wait for response (infinite wait)...`)
 		// Wait for response (existing functionality)
 		const response = await this.waitForResponse(responseChannel, 0) // 0 = infinite wait

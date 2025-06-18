@@ -2,6 +2,7 @@ import { createClient, RedisClientType } from "redis"
 import { isQueueModeEnabled, RedisConfig } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 import { ConsumerStateManager, ConsumerState } from "./ConsumerStateManager"
+import { NotificationManager, NotificationListener } from "./NotificationManager"
 
 export interface ConsumerConfig {
 	functionName: string
@@ -29,17 +30,21 @@ export class ConsumerLifecycleManager {
 	private consumerId: string | null = null
 	private isRunning: boolean = false
 	private processingLoop: Promise<void> | null = null
-	private readonly BLOCK_TIME = 100 // 100ms for near-instant processing
+	private readonly BLOCK_TIME = 30000 // 30 seconds (was 100ms) - reduces idle Redis traffic by 99.7%
 	private readonly RETRY_DELAY = 1000 // 1 second
 	private readonly PROCESSING_TIMEOUT = 30000 // 30 seconds
+	private notificationManager: NotificationManager | null = null
+	private wakeUpReceived: boolean = false
 
 	constructor(
 		private config: ConsumerConfig,
 		private redisConfig: RedisConfig,
-		private messageHandler: (message: any) => Promise<any>
+		private messageHandler: (message: any) => Promise<any>,
+		notificationManager?: NotificationManager
 	) {
 		this.stateManager = new ConsumerStateManager(redisConfig)
 		this.consumerId = `${config.functionName}-${config.scope}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+		this.notificationManager = notificationManager || null
 	}
 
 	/**
@@ -70,6 +75,23 @@ export class ConsumerLifecycleManager {
 
 			// Register consumer in state management
 			await this.registerConsumer()
+
+			// Subscribe to wake-up notifications if available
+			if (this.notificationManager) {
+				logger.log("🔄 LIFECYCLE: Subscribing to wake-up notifications for instant responsiveness")
+				const wakeUpListener: NotificationListener = (message: any) => {
+					if (message.type === "function-call" && message.functionName === this.config.functionName) {
+						console.log(`📢📢📢 CONSUMER: WAKE-UP NOTIFICATION received for ${this.config.functionName}!`)
+						logger.log(`📢🔄 LIFECYCLE: Wake-up notification received for function call ${message.callId}`)
+						this.wakeUpReceived = true
+					}
+				}
+
+				await this.notificationManager.subscribeToWakeUp(wakeUpListener)
+				logger.log("🔄 LIFECYCLE: ✅ Subscribed to wake-up notifications - will respond instantly to function calls")
+			} else {
+				logger.log("🔄 LIFECYCLE: No notification manager - using 30-second polling only")
+			}
 
 			// Start processing loop
 			this.isRunning = true
@@ -253,7 +275,7 @@ export class ConsumerLifecycleManager {
 	}
 
 	/**
-	 * Process messages from Redis stream
+	 * Process messages from Redis stream with instant wake-up support
 	 */
 	private async processStreamMessages(): Promise<void> {
 		if (!this.client || !this.isRunning) {
@@ -261,7 +283,15 @@ export class ConsumerLifecycleManager {
 		}
 
 		try {
-			// Read messages from stream (no noisy polling logs)
+			// Check if we received a wake-up notification - if so, use non-blocking read
+			const useNonBlocking = this.wakeUpReceived
+			if (useNonBlocking) {
+				console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
+				logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
+				this.wakeUpReceived = false // Reset flag
+			}
+
+			// Read messages from stream - instant if wake-up received, otherwise 30-second wait
 			const result = await this.client.xReadGroup(
 				this.config.groupName,
 				this.consumerId!,
@@ -273,12 +303,17 @@ export class ConsumerLifecycleManager {
 				],
 				{
 					COUNT: 1,
-					BLOCK: this.BLOCK_TIME,
+					BLOCK: useNonBlocking ? 0 : this.BLOCK_TIME, // 0 = non-blocking, 30000 = 30 seconds
 				}
 			)
 
 			if (!result || result.length === 0) {
-				// No messages, continue loop (no log spam)
+				// No messages
+				if (useNonBlocking) {
+					console.log(`📢📢📢 CONSUMER: No messages found after wake-up notification`)
+					logger.log("📢🔄 LIFECYCLE: No messages found after wake-up - may have been processed by another consumer")
+				}
+				// Continue loop (no log spam for normal polling)
 				return
 			}
 

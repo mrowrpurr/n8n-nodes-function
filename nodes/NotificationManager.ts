@@ -1,5 +1,6 @@
 import { RedisConnectionManager } from "./RedisConnectionManager"
 import { functionRegistryLogger as logger } from "./Logger"
+import { REDIS_KEY_PREFIX } from "./FunctionRegistry"
 
 export type NotificationListener = (message: any) => void
 
@@ -99,6 +100,56 @@ export class NotificationManager {
 		console.log(`📢📢📢 NOTIFICATIONS: Published to Redis successfully`)
 
 		logger.log(`📢 NOTIFICATIONS: Published to ${channel}:`, message)
+	}
+
+	/**
+	 * Publish wake-up notification for function calls
+	 * This instantly notifies all Function nodes to check for new work
+	 */
+	async publishWakeUp(functionName: string, callId: string): Promise<void> {
+		const channel = `${REDIS_KEY_PREFIX}wake-up`
+		const message = {
+			type: "function-call",
+			functionName,
+			callId,
+			timestamp: Date.now(),
+		}
+
+		await this.publish(channel, message)
+	}
+
+	/**
+	 * Publish shutdown notification for Function node restarts
+	 * This notifies CallFunction nodes that workers are restarting
+	 */
+	async publishShutdown(workflowId: string, restartReason: string): Promise<void> {
+		const channel = `${REDIS_KEY_PREFIX}shutdown`
+		const message = {
+			type: "function-restart",
+			workflowId,
+			reason: restartReason,
+			timestamp: Date.now(),
+		}
+
+		await this.publish(channel, message)
+	}
+
+	/**
+	 * Subscribe to wake-up notifications
+	 * Function nodes use this to get instant notification of new function calls
+	 */
+	async subscribeToWakeUp(listener: NotificationListener): Promise<void> {
+		const channel = `${REDIS_KEY_PREFIX}wake-up`
+		await this.subscribe(channel, listener)
+	}
+
+	/**
+	 * Subscribe to shutdown notifications
+	 * CallFunction nodes use this to detect when Function nodes are restarting
+	 */
+	async subscribeToShutdown(listener: NotificationListener): Promise<void> {
+		const channel = `${REDIS_KEY_PREFIX}shutdown`
+		await this.subscribe(channel, listener)
 	}
 
 	/**
