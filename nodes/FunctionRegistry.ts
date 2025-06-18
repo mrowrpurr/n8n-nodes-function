@@ -46,6 +46,7 @@ export class FunctionRegistry {
 	private readonly WORKER_TIMEOUT = 30000 // 30 seconds
 	private readonly CALL_TIMEOUT = 300000 // 5 minutes
 	private readonly STREAM_READY_TIMEOUT = 5000 // 5 seconds
+	// Garbage collector properties removed - using prevention-first approach instead
 
 	constructor(redisConfig: RedisConfig) {
 		this.connectionManager = RedisConnectionManager.getInstance(redisConfig)
@@ -56,6 +57,7 @@ export class FunctionRegistry {
 			halfOpenMaxCalls: 2,
 		})
 		logger.log("🏗️ REGISTRY: Function registry initialized with hardened architecture")
+		// Garbage collector will be added later - prevention first approach
 	}
 
 	/**
@@ -703,6 +705,171 @@ export class FunctionRegistry {
 				returnValues: this.returnValues.size,
 			},
 		}
+	}
+
+	/**
+	 * List all workers and functions in Redis (for diagnostics)
+	 */
+	async listAllWorkersAndFunctions(): Promise<{ functions: any[]; workers: any[]; wouldGC: any[] }> {
+		if (!isQueueModeEnabled()) {
+			return { functions: [], workers: [], wouldGC: [] }
+		}
+
+		return await this.circuitBreaker.execute(async () => {
+			return await this.connectionManager.executeOperation(async (client) => {
+				const registryKey = `registry:functions`
+				const functionKeys = await client.sMembers(registryKey)
+
+				const functions = []
+				const workers = []
+				const wouldGC = []
+
+				for (const functionKey of functionKeys) {
+					const [name, scope] = functionKey.split(":")
+					const fullKey = `function:${name}:${scope}`
+					const functionData = await client.hGetAll(fullKey)
+
+					functions.push({
+						name,
+						scope,
+						workflowId: functionData.workflowId,
+						registeredAt: functionData.registeredAt,
+					})
+
+					// Get workers for this function
+					const workersKey = `workers:${name}`
+					const functionWorkers = await client.sMembers(workersKey)
+
+					for (const workerId of functionWorkers) {
+						const workerKey = `worker:${workerId}:${name}`
+						const lastSeen = await client.get(workerKey)
+						const age = lastSeen ? Date.now() - parseInt(lastSeen) : null
+						const isHealthy = age !== null && age < this.WORKER_TIMEOUT
+
+						const workerInfo = {
+							workerId,
+							functionName: name,
+							lastSeen: lastSeen ? new Date(parseInt(lastSeen)).toISOString() : "never",
+							age: age ? `${Math.round(age / 1000)}s` : "unknown",
+							isHealthy,
+						}
+
+						workers.push(workerInfo)
+
+						// Check if this would be garbage collected
+						if (!isHealthy) {
+							wouldGC.push({
+								type: "worker",
+								...workerInfo,
+								reason: age === null ? "no health timestamp" : `stale (${Math.round(age / 1000)}s old)`,
+							})
+						}
+					}
+
+					// Check if function would be GC'd (no healthy workers)
+					let hasHealthyWorkers = false
+					for (const workerId of functionWorkers) {
+						if (await this.isWorkerHealthy(workerId, name)) {
+							hasHealthyWorkers = true
+							break
+						}
+					}
+
+					if (functionWorkers.length === 0 || !hasHealthyWorkers) {
+						wouldGC.push({
+							type: "function",
+							name,
+							scope,
+							reason: functionWorkers.length === 0 ? "no workers" : "no healthy workers",
+						})
+					}
+				}
+
+				return { functions, workers, wouldGC }
+			}, `list-all-diagnostics`)
+		}, `list-all-diagnostics`)
+	}
+
+	/**
+	 * Enhanced logging for worker registration with duplicate detection
+	 */
+	async registerWorkerWithDuplicateDetection(workerId: string, functionName: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		// First, list existing workers and detect duplicates
+		const existingWorkers = await this.getAvailableWorkers(functionName)
+		logger.log(`🔍 PREVENTION: Registering worker ${workerId} for function ${functionName}`)
+		logger.log(`🔍 PREVENTION: Existing workers: [${existingWorkers.join(", ")}]`)
+
+		// Check for duplicates or stale workers
+		const duplicates = existingWorkers.filter((id) => id.includes(functionName))
+		if (duplicates.length > 0) {
+			logger.warn(`🚨 PREVENTION: Found ${duplicates.length} existing workers for ${functionName}: [${duplicates.join(", ")}]`)
+
+			// Check which ones are stale
+			const staleWorkers = []
+			for (const existingWorkerId of duplicates) {
+				const isHealthy = await this.isWorkerHealthy(existingWorkerId, functionName)
+				if (!isHealthy) {
+					staleWorkers.push(existingWorkerId)
+				}
+			}
+
+			if (staleWorkers.length > 0) {
+				logger.warn(`🧹 PREVENTION: Would GC these stale workers: [${staleWorkers.join(", ")}]`)
+
+				// Clean them up as part of prevention
+				for (const staleWorkerId of staleWorkers) {
+					await this.unregisterWorker(staleWorkerId, functionName)
+					logger.log(`🧹 PREVENTION: Cleaned up stale worker: ${staleWorkerId}`)
+				}
+			}
+		}
+
+		// Now register the new worker
+		await this.registerWorker(workerId, functionName)
+		logger.log(`✅ PREVENTION: Worker registered successfully: ${workerId}`)
+	}
+
+	/**
+	 * Enhanced function registration with cleanup
+	 */
+	async registerFunctionWithCleanup(definition: FunctionDefinition): Promise<void> {
+		logger.log(`🔍 PREVENTION: Registering function ${definition.name} in scope ${definition.scope}`)
+
+		// Check for existing registrations
+		const existingFunctions = await this.getAvailableFunctions(definition.workflowId)
+		const existingFunction = existingFunctions.find((f) => f.value === definition.name)
+
+		if (existingFunction) {
+			logger.warn(`🚨 PREVENTION: Function ${definition.name} already exists in workflow ${definition.workflowId}`)
+
+			// Check if it has healthy workers
+			const workers = await this.getAvailableWorkers(definition.name)
+			const healthyWorkers = []
+			const staleWorkers = []
+
+			for (const workerId of workers) {
+				const isHealthy = await this.isWorkerHealthy(workerId, definition.name)
+				if (isHealthy) {
+					healthyWorkers.push(workerId)
+				} else {
+					staleWorkers.push(workerId)
+				}
+			}
+
+			logger.log(`🔍 PREVENTION: Existing function has ${healthyWorkers.length} healthy workers, ${staleWorkers.length} stale workers`)
+
+			if (staleWorkers.length > 0) {
+				logger.warn(`🧹 PREVENTION: Would GC these stale workers: [${staleWorkers.join(", ")}]`)
+			}
+		}
+
+		// Register the function
+		await this.registerFunction(definition)
+		logger.log(`✅ PREVENTION: Function registered successfully: ${definition.name}`)
 	}
 
 	/**

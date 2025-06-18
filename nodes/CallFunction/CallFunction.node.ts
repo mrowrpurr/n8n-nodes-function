@@ -222,14 +222,36 @@ export class CallFunction implements INodeType {
 
 				const registry = await getFunctionRegistry()
 
-				// Conservative cleanup - only remove functions without healthy workers
+				// Enhanced diagnostic logging before cleanup
 				try {
+					logger.log("🔍 PREVENTION: Checking for stale resources before loading functions...")
+					const diagnostics = await registry.listAllWorkersAndFunctions()
+
+					// Log what would be garbage collected
+					const wouldGCFunctions = diagnostics.wouldGC.filter((item: any) => item.type === "function")
+					const wouldGCWorkers = diagnostics.wouldGC.filter((item: any) => item.type === "worker")
+
+					if (wouldGCFunctions.length > 0) {
+						logger.log(`🧹 PREVENTION: Would GC ${wouldGCFunctions.length} stale functions:`)
+						wouldGCFunctions.forEach((item: any) => {
+							logger.log(`🧹 PREVENTION:   - Function ${item.name} (${item.scope}): ${item.reason}`)
+						})
+					}
+
+					if (wouldGCWorkers.length > 0) {
+						logger.log(`🧹 PREVENTION: Would GC ${wouldGCWorkers.length} stale workers:`)
+						wouldGCWorkers.forEach((item: any) => {
+							logger.log(`🧹 PREVENTION:   - Worker ${item.workerId} (${item.functionName}): ${item.reason}`)
+						})
+					}
+
+					// Conservative cleanup - only remove functions without healthy workers
 					const cleanedCount = await registry.cleanupStaleFunctions()
 					if (cleanedCount > 0) {
 						logger.log("🔧 CallFunction: Cleaned up", cleanedCount, "stale functions")
 					}
 				} catch (error) {
-					logger.warn("🔧 CallFunction: Error cleaning up stale functions:", error)
+					logger.warn("🔧 CallFunction: Error during diagnostic check or cleanup:", error)
 				}
 
 				const availableFunctions = await registry.getAvailableFunctions(workflowId)
@@ -525,19 +547,38 @@ export class CallFunction implements INodeType {
 						)
 					}
 
-					// Filter workers by health check
+					// Enhanced worker health check with diagnostic logging
 					const healthyWorkers = []
+					const staleWorkers = []
+
+					logger.log(`🔍 PREVENTION: Checking health of ${availableWorkers.length} workers for function ${functionName}`)
 					for (const workerId of availableWorkers) {
 						const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
-						logger.log("🔍 DIAGNOSTIC: Worker health check - Worker:", workerId, "Healthy:", isHealthy)
+						logger.log("🔍 PREVENTION: Worker health check - Worker:", workerId, "Healthy:", isHealthy)
 						if (isHealthy) {
 							healthyWorkers.push(workerId)
+						} else {
+							staleWorkers.push(workerId)
 						}
 					}
+
+					// Log diagnostic information
+					if (staleWorkers.length > 0) {
+						logger.log(`🧹 PREVENTION: Found ${staleWorkers.length} stale workers that would be GC'd: [${staleWorkers.join(", ")}]`)
+					}
+					logger.log(`✅ PREVENTION: Found ${healthyWorkers.length} healthy workers: [${healthyWorkers.join(", ")}]`)
 
 					// RECOVERY MECHANISM: If no healthy workers, attempt recovery
 					if (healthyWorkers.length === 0) {
 						logger.warn("🚨 RECOVERY: No healthy workers found, attempting recovery...")
+
+						// Show detailed diagnostics before recovery
+						const diagnostics = await registry.listAllWorkersAndFunctions()
+						const functionWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
+						logger.log(`🚨 RECOVERY: Detailed worker status for function ${functionName}:`)
+						functionWorkers.forEach((w: any) => {
+							logger.log(`🚨 RECOVERY:   - Worker ${w.workerId}: ${w.isHealthy ? "healthy" : "stale"} (last seen: ${w.lastSeen}, age: ${w.age})`)
+						})
 
 						// Clean up stale workers first
 						const cleanedCount = await registry.cleanupStaleWorkers(functionName, 30000) // 30 second timeout

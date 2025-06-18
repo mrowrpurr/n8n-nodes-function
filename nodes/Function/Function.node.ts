@@ -182,7 +182,7 @@ export class Function implements INodeType {
 
 			// Register function in registry so CallFunction can find it
 			registry = await getFunctionRegistry()
-			await registry.registerFunction({
+			await registry.registerFunctionWithCleanup({
 				name: functionName,
 				scope: workflowId,
 				code: "", // No code - this is a workflow trigger
@@ -197,10 +197,10 @@ export class Function implements INodeType {
 
 			await lifecycleManager.start()
 
-			// CRITICAL: Register this node as a worker for the function
+			// CRITICAL: Register this node as a worker for the function with duplicate detection
 			workerId = lifecycleManager.getConsumerId()
 			if (workerId) {
-				await registry.registerWorker(workerId, functionName)
+				await registry.registerWorkerWithDuplicateDetection(workerId, functionName)
 				logger.log("🚀 FUNCTION: ✅ Worker registered:", workerId)
 
 				// Start periodic health updates (every 10 seconds)
@@ -221,64 +221,127 @@ export class Function implements INodeType {
 
 			return {
 				closeFunction: async () => {
-					logger.log("🚀 FUNCTION: Closing Function node...")
+					logger.log("🔒 PREVENTION: Starting Function node shutdown sequence...")
+					logger.log(`🔒 PREVENTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
-						// Stop health updates
+						// STEP 1: Stop accepting new messages immediately
+						logger.log("🔒 PREVENTION: Step 1 - Stopping health updates to signal unavailability")
 						if (healthUpdateInterval) {
 							clearInterval(healthUpdateInterval)
 							healthUpdateInterval = null
-							logger.log("🚀 FUNCTION: ✅ Worker health updates stopped")
+							logger.log("🔒 PREVENTION: ✅ Worker health updates stopped")
 						}
 
-						// Unregister worker
-						if (workerId && registry) {
-							await registry.unregisterWorker(workerId, functionName)
-							logger.log("🚀 FUNCTION: ✅ Worker unregistered:", workerId)
-						}
-
-						// Unregister function from registry
-						if (registry) {
-							await registry.unregisterFunction(functionName, workflowId)
-							logger.log("🚀 FUNCTION: ✅ Function unregistered:", functionName)
-						}
-
-						// Stop lifecycle manager
+						// STEP 2: Stop the lifecycle manager to stop consuming messages
+						logger.log("🔒 PREVENTION: Step 2 - Stopping consumer lifecycle manager")
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
+							logger.log("🔒 PREVENTION: ✅ Consumer lifecycle manager stopped")
+						}
+
+						// STEP 3: Wait a moment for any in-flight messages to complete
+						logger.log("🔒 PREVENTION: Step 3 - Waiting 2 seconds for in-flight messages to complete")
+						await new Promise((resolve) => setTimeout(resolve, 2000))
+
+						// STEP 4: Check for any remaining workers before unregistering
+						if (workerId && registry) {
+							logger.log("🔒 PREVENTION: Step 4 - Checking for duplicate workers before cleanup")
+							const diagnostics = await registry.listAllWorkersAndFunctions()
+							const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
+							logger.log(`🔒 PREVENTION: Found ${myWorkers.length} total workers for function ${functionName}:`)
+							myWorkers.forEach((w: any) => {
+								logger.log(`🔒 PREVENTION:   - Worker ${w.workerId}: ${w.isHealthy ? "healthy" : "stale"} (last seen: ${w.lastSeen})`)
+							})
+
+							// Log what would be garbage collected
+							const wouldGC = diagnostics.wouldGC.filter((item: any) => item.type === "worker" && item.functionName === functionName)
+							if (wouldGC.length > 0) {
+								logger.log(`🧹 PREVENTION: Would GC ${wouldGC.length} stale workers:`)
+								wouldGC.forEach((item: any) => {
+									logger.log(`🧹 PREVENTION:   - ${item.workerId}: ${item.reason}`)
+								})
+							}
+
+							// Unregister this specific worker
+							await registry.unregisterWorker(workerId, functionName)
+							logger.log("🔒 PREVENTION: ✅ Worker unregistered:", workerId)
+						}
+
+						// STEP 5: Wait another moment before function cleanup
+						logger.log("🔒 PREVENTION: Step 5 - Waiting 1 second before function cleanup")
+						await new Promise((resolve) => setTimeout(resolve, 1000))
+
+						// STEP 6: Unregister function from registry
+						if (registry) {
+							logger.log("🔒 PREVENTION: Step 6 - Unregistering function from registry")
+							await registry.unregisterFunction(functionName, workflowId)
+							logger.log("🔒 PREVENTION: ✅ Function unregistered:", functionName)
 						}
 
 						// DON'T shutdown the connection manager here - it's shared!
 						// The connection manager is a singleton and may be used by other nodes
-						logger.log("🚀 FUNCTION: ✅ Function node closed successfully")
+						logger.log("🔒 PREVENTION: ✅ Function node shutdown sequence completed successfully")
 					} catch (error) {
-						logger.error("🚀 FUNCTION: ❌ Error closing Function node:", error)
+						logger.error("🔒 PREVENTION: ❌ Error during shutdown sequence:", error)
+
+						// Emergency cleanup - try to unregister even if other steps failed
+						try {
+							if (workerId && registry) {
+								await registry.unregisterWorker(workerId, functionName)
+								logger.log("🔒 PREVENTION: ✅ Emergency worker cleanup completed")
+							}
+							if (registry) {
+								await registry.unregisterFunction(functionName, workflowId)
+								logger.log("🔒 PREVENTION: ✅ Emergency function cleanup completed")
+							}
+						} catch (emergencyError) {
+							logger.error("🔒 PREVENTION: ❌ Emergency cleanup also failed:", emergencyError)
+						}
 					}
 				},
 			}
 		} catch (error) {
-			logger.error("🚀 FUNCTION: ❌ Failed to start Function node:", error)
+			logger.error("🔒 PREVENTION: ❌ Failed to start Function node:", error)
 
-			// Cleanup on error
+			// Enhanced cleanup on error with prevention logging
 			try {
+				logger.log("🔒 PREVENTION: Starting error cleanup sequence...")
+
 				// Stop health updates
 				if (healthUpdateInterval) {
 					clearInterval(healthUpdateInterval)
 					healthUpdateInterval = null
+					logger.log("🔒 PREVENTION: ✅ Health updates stopped during error cleanup")
 				}
 
-				// Unregister worker
-				if (workerId && registry) {
-					await registry.unregisterWorker(workerId, functionName)
-				}
-
-				// Stop lifecycle manager
+				// Stop lifecycle manager first
 				if (lifecycleManager) {
 					await lifecycleManager.stop()
+					logger.log("🔒 PREVENTION: ✅ Lifecycle manager stopped during error cleanup")
 				}
+
+				// Check for any workers that might have been created
+				if (workerId && registry) {
+					logger.log("🔒 PREVENTION: Checking for workers to clean up during error...")
+					const diagnostics = await registry.listAllWorkersAndFunctions()
+					const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
+					logger.log(`🔒 PREVENTION: Found ${myWorkers.length} workers for function ${functionName} during error cleanup`)
+
+					await registry.unregisterWorker(workerId, functionName)
+					logger.log("🔒 PREVENTION: ✅ Worker unregistered during error cleanup:", workerId)
+				}
+
+				// Clean up function registration if it was created
+				if (registry && functionName) {
+					await registry.unregisterFunction(functionName, this.getWorkflow().id || "unknown")
+					logger.log("🔒 PREVENTION: ✅ Function unregistered during error cleanup:", functionName)
+				}
+
 				// DON'T shutdown connection manager on error - it's shared!
+				logger.log("🔒 PREVENTION: ✅ Error cleanup sequence completed")
 			} catch (cleanupError) {
-				logger.error("🚀 FUNCTION: ❌ Error during cleanup:", cleanupError)
+				logger.error("🔒 PREVENTION: ❌ Error during cleanup:", cleanupError)
 			}
 
 			throw new NodeOperationError(this.getNode(), `Failed to start function: ${error}`)
