@@ -85,16 +85,26 @@ export class WorkerCoordinator {
 	 * Wait for worker with instant notification
 	 */
 	async waitForWorkerAvailability(functionName: string, workflowId: string, timeout: number = 10000): Promise<WorkerInfo> {
+		console.log(`🎯🎯🎯 COORDINATOR: waitForWorkerAvailability CALLED`)
+		console.log(`🎯🎯🎯 COORDINATOR: Function name: ${functionName}`)
+		console.log(`🎯🎯🎯 COORDINATOR: Workflow ID: ${workflowId}`)
+		console.log(`🎯🎯🎯 COORDINATOR: Timeout: ${timeout}ms`)
 		logger.log(`🎯 COORDINATOR: Checking worker availability for ${functionName}`)
 
+		console.log(`🎯🎯🎯 COORDINATOR: Checking immediate availability...`)
 		// Check immediate availability first
 		const workers = await this.registry.getAvailableWorkers(functionName)
+		console.log(`🎯🎯🎯 COORDINATOR: Found ${workers.length} workers:`, workers)
 
 		if (workers.length > 0) {
+			console.log(`🎯🎯🎯 COORDINATOR: Checking worker health...`)
 			// Check if any worker is healthy
 			for (const workerId of workers) {
+				console.log(`🎯🎯🎯 COORDINATOR: Checking health of worker: ${workerId}`)
 				const isHealthy = await this.registry.isWorkerHealthy(workerId, functionName)
+				console.log(`🎯🎯🎯 COORDINATOR: Worker ${workerId} healthy: ${isHealthy}`)
 				if (isHealthy) {
+					console.log(`🎯🎯🎯 COORDINATOR: Found healthy worker immediately: ${workerId}`)
 					logger.log(`🎯 COORDINATOR: Found healthy worker immediately: ${workerId}`)
 					return {
 						workerId,
@@ -104,11 +114,18 @@ export class WorkerCoordinator {
 					}
 				}
 			}
+			console.log(`🎯🎯🎯 COORDINATOR: No healthy workers found among available workers`)
+		} else {
+			console.log(`🎯🎯🎯 COORDINATOR: No workers available at all`)
 		}
 
 		// No healthy workers available - wait for instant notification
+		console.log(`🎯🎯🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
+		console.log(`🎯🎯🎯 COORDINATOR: About to call readinessWatcher.waitForFunction...`)
 		logger.log(`🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
-		return await this.readinessWatcher.waitForFunction(functionName, workflowId, timeout)
+		const result = await this.readinessWatcher.waitForFunction(functionName, workflowId, timeout)
+		console.log(`🎯🎯🎯 COORDINATOR: readinessWatcher.waitForFunction completed:`, result)
+		return result
 	}
 
 	/**

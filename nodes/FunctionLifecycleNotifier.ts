@@ -22,6 +22,11 @@ export class FunctionLifecycleNotifier {
 	 * Notify that function is ready to receive calls
 	 */
 	async notifyReady(): Promise<void> {
+		console.log(`🚀🚀🚀 LIFECYCLE: notifyReady CALLED`)
+		console.log(`🚀🚀🚀 LIFECYCLE: Function name: ${this.functionName}`)
+		console.log(`🚀🚀🚀 LIFECYCLE: Workflow ID: ${this.workflowId}`)
+		console.log(`🚀🚀🚀 LIFECYCLE: Worker ID: ${this.workerId}`)
+
 		const channel = `function:ready:${this.functionName}:${this.workflowId}`
 		const message = {
 			workerId: this.workerId,
@@ -31,7 +36,13 @@ export class FunctionLifecycleNotifier {
 			status: "ready",
 		}
 
+		console.log(`🚀🚀🚀 LIFECYCLE: Channel: ${channel}`)
+		console.log(`🚀🚀🚀 LIFECYCLE: Message:`, message)
+		console.log(`🚀🚀🚀 LIFECYCLE: About to publish notification...`)
+
 		await this.notificationManager.publish(channel, message)
+
+		console.log(`🚀🚀🚀 LIFECYCLE: Notification published successfully`)
 		logger.log(`🚀 LIFECYCLE: Published ready notification for ${this.functionName}`)
 	}
 

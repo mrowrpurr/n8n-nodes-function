@@ -381,9 +381,11 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		logger.log(`Starting execution`)
+		console.log("🚀🚀🚀 CALLFUNCTION: EXECUTE METHOD CALLED")
+		logger.log(`🚀🚀🚀 CALLFUNCTION: Starting execution`)
 		const items = this.getInputData()
-		logger.log(`Input items count =`, items.length)
+		console.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
+		logger.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
 
 		// Debug: Log all node parameters
 		try {
@@ -504,17 +506,25 @@ export class CallFunction implements INodeType {
 			const item = items[itemIndex]
 
 			try {
+				console.log("🚀🚀🚀 CALLFUNCTION: ENTERING TRY BLOCK FOR FUNCTION CALL")
 				// Check if queue mode is enabled to determine call method
+				console.log("🔍 CALLFUNCTION: Checking queue mode status...")
 				logger.debug("🔍 CallFunction: Checking queue mode status...")
 				const queueModeStatus = isQueueModeEnabled()
+				console.log("🔍 CALLFUNCTION: Queue mode enabled =", queueModeStatus)
 				logger.debug("🔍 CallFunction: Queue mode enabled =", queueModeStatus)
 
 				// In queue mode, also check if we have Redis configuration
+				console.log("🚀🚀🚀 CALLFUNCTION: Getting enhanced registry...")
 				const enhancedRegistry = await getEnhancedFunctionRegistry()
+				console.log("🚀🚀🚀 CALLFUNCTION: Enhanced registry obtained:", !!enhancedRegistry)
 				const registry = await getFunctionRegistry() // Keep original for fallback
+				console.log("🚀🚀🚀 CALLFUNCTION: Standard registry obtained:", !!registry)
 				const useRedisStreams = queueModeStatus
+				console.log("🚀🚀🚀 CALLFUNCTION: Use Redis streams =", useRedisStreams)
 
 				if (useRedisStreams) {
+					console.log("🌊🌊🌊 CALLFUNCTION: USING REDIS STREAMS FOR FUNCTION CALL")
 					logger.log("🌊 CallFunction: Using Redis streams for function call with instant readiness")
 
 					// Generate unique call ID
@@ -522,15 +532,25 @@ export class CallFunction implements INodeType {
 					const responseChannel = `function:response:${callId}`
 					const streamKey = `function_calls:${functionName}:${workflowId}`
 
+					console.log("🌊 CALLFUNCTION: Call ID:", callId)
+					console.log("🌊 CALLFUNCTION: Stream key:", streamKey)
+					console.log("🌊 CALLFUNCTION: Response channel:", responseChannel)
 					logger.log("🌊 CallFunction: Call ID:", callId)
 					logger.log("🌊 CallFunction: Stream key:", streamKey)
 					logger.log("🌊 CallFunction: Response channel:", responseChannel)
 
 					// Use enhanced registry for instant worker availability
 					if (enhancedRegistry instanceof EnhancedFunctionRegistry) {
+						console.log("⚡⚡⚡ CALLFUNCTION: USING ENHANCED REGISTRY WITH INSTANT READINESS")
 						logger.log("⚡ CallFunction: Using instant readiness check (no polling!)")
 
 						try {
+							console.log("⚡⚡⚡ CALLFUNCTION: CALLING callFunctionWithInstantReadiness...")
+							console.log("⚡⚡⚡ CALLFUNCTION: Function name:", functionName)
+							console.log("⚡⚡⚡ CALLFUNCTION: Workflow ID:", workflowId)
+							console.log("⚡⚡⚡ CALLFUNCTION: Parameters:", functionParameters)
+							console.log("⚡⚡⚡ CALLFUNCTION: Timeout: 10000ms")
+
 							// This will return instantly if workers are available, or wait for pub/sub notification
 							const response = await enhancedRegistry.callFunctionWithInstantReadiness(
 								functionName,
@@ -540,12 +560,18 @@ export class CallFunction implements INodeType {
 								10000 // 10 second timeout
 							)
 
+							console.log("⚡⚡⚡ CALLFUNCTION: RECEIVED RESPONSE FROM callFunctionWithInstantReadiness:", response)
+
+							console.log("⚡⚡⚡ CALLFUNCTION: Processing response...")
 							logger.log("⚡ CallFunction: Received instant response:", response)
 
 							// Process the response
 							if (!response.success) {
+								console.log("❌❌❌ CALLFUNCTION: RESPONSE INDICATES FAILURE:", response.error)
 								throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
 							}
+
+							console.log("✅✅✅ CALLFUNCTION: RESPONSE INDICATES SUCCESS")
 
 							// Start with the original item
 							let resultJson: any = { ...item.json }
@@ -577,15 +603,25 @@ export class CallFunction implements INodeType {
 							returnData.push(resultItem)
 							continue // Skip the old polling logic
 						} catch (error) {
+							console.log("❌❌❌ CALLFUNCTION: ERROR IN callFunctionWithInstantReadiness:", error)
+							console.log("❌❌❌ CALLFUNCTION: Error message:", error.message)
+							console.log("❌❌❌ CALLFUNCTION: Error stack:", error.stack)
+
 							if (error.message.includes("not ready after")) {
+								console.log("❌❌❌ CALLFUNCTION: TIMEOUT ERROR - Function not ready")
 								// Function didn't become ready in time
 								throw new NodeOperationError(
 									this.getNode(),
 									`Function '${functionName}' not available. This usually means the Function node is not running or the workflow containing the Function node is not active.`
 								)
 							}
+							console.log("❌❌❌ CALLFUNCTION: RETHROWING ERROR")
 							throw error
 						}
+					} else {
+						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry is NOT an instance of EnhancedFunctionRegistry")
+						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry type:", typeof enhancedRegistry)
+						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry constructor:", (enhancedRegistry as any)?.constructor?.name)
 					}
 
 					// Fallback to original polling logic if not using enhanced registry
@@ -846,6 +882,9 @@ export class CallFunction implements INodeType {
 					}
 				}
 			} catch (error) {
+				console.log("❌❌❌ CALLFUNCTION: CAUGHT ERROR IN MAIN TRY-CATCH:", error)
+				console.log("❌❌❌ CALLFUNCTION: Error message:", error.message)
+				console.log("❌❌❌ CALLFUNCTION: Error stack:", error.stack)
 				logger.error("🔧 CallFunction: Error calling function:", error)
 
 				// Create an error result item
@@ -864,8 +903,10 @@ export class CallFunction implements INodeType {
 				}
 
 				if (this.continueOnFail()) {
+					console.log("⚠️⚠️⚠️ CALLFUNCTION: Continue on fail enabled, adding error item")
 					returnData.push(errorItem)
 				} else {
+					console.log("❌❌❌ CALLFUNCTION: Continue on fail disabled, rethrowing error")
 					throw error
 				}
 			}

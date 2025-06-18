@@ -25,23 +25,37 @@ export class FunctionReadinessWatcher {
 	 * Wait for function to become ready with instant notification
 	 */
 	async waitForFunction(functionName: string, workflowId: string, timeout: number = 10000): Promise<WorkerInfo> {
+		console.log(`👀👀👀 WATCHER: waitForFunction CALLED`)
+		console.log(`👀👀👀 WATCHER: Function name: ${functionName}`)
+		console.log(`👀👀👀 WATCHER: Workflow ID: ${workflowId}`)
+		console.log(`👀👀👀 WATCHER: Timeout: ${timeout}ms`)
+
 		const key = `${functionName}:${workflowId}`
+		console.log(`👀👀👀 WATCHER: Key: ${key}`)
 
 		// Check if already waiting
 		if (this.pendingWaits.has(key)) {
+			console.log(`👀👀👀 WATCHER: Already waiting for ${functionName}, reusing existing wait`)
 			logger.log(`👀 WATCHER: Already waiting for ${functionName}, reusing existing wait`)
 			return this.pendingWaits.get(key)!
 		}
 
+		console.log(`👀👀👀 WATCHER: Starting new wait for ${functionName}`)
 		logger.log(`👀 WATCHER: Starting instant wait for ${functionName} (timeout: ${timeout}ms)`)
 
 		const promise = new Promise<WorkerInfo>((resolve, reject) => {
+			console.log(`👀👀👀 WATCHER: Creating promise for ${functionName}`)
+
 			const timeoutId = setTimeout(() => {
+				console.log(`👀👀👀 WATCHER: TIMEOUT REACHED for ${functionName} after ${timeout}ms`)
 				this.cleanup(key)
 				reject(new Error(`Function ${functionName} not ready after ${timeout}ms`))
 			}, timeout)
 
+			console.log(`👀👀👀 WATCHER: Timeout set for ${timeout}ms`)
+
 			const listener: NotificationListener = (message: any) => {
+				console.log(`👀👀👀 WATCHER: RECEIVED NOTIFICATION for ${functionName}:`, message)
 				logger.log(`👀 WATCHER: Received ready notification for ${functionName}:`, message)
 				clearTimeout(timeoutId)
 				this.cleanup(key)
@@ -53,20 +67,33 @@ export class FunctionReadinessWatcher {
 				})
 			}
 
+			console.log(`👀👀👀 WATCHER: Created listener function`)
+
 			// Store listener for cleanup
 			this.activeListeners.set(key, listener)
+			console.log(`👀👀👀 WATCHER: Stored listener in activeListeners`)
 
 			// Subscribe to ready channel
 			const channel = `function:ready:${functionName}:${workflowId}`
-			this.notificationManager.subscribe(channel, listener).catch((error) => {
-				logger.error(`👀 WATCHER: Failed to subscribe to ${channel}:`, error)
-				clearTimeout(timeoutId)
-				this.cleanup(key)
-				reject(error)
-			})
+			console.log(`👀👀👀 WATCHER: About to subscribe to channel: ${channel}`)
+
+			this.notificationManager
+				.subscribe(channel, listener)
+				.then(() => {
+					console.log(`👀👀👀 WATCHER: Successfully subscribed to ${channel}`)
+				})
+				.catch((error) => {
+					console.log(`👀👀👀 WATCHER: FAILED to subscribe to ${channel}:`, error)
+					logger.error(`👀 WATCHER: Failed to subscribe to ${channel}:`, error)
+					clearTimeout(timeoutId)
+					this.cleanup(key)
+					reject(error)
+				})
 		})
 
+		console.log(`👀👀👀 WATCHER: Storing promise in pendingWaits`)
 		this.pendingWaits.set(key, promise)
+		console.log(`👀👀👀 WATCHER: Returning promise for ${functionName}`)
 		return promise
 	}
 

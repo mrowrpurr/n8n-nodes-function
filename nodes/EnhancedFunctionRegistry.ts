@@ -69,10 +69,17 @@ export class EnhancedFunctionRegistry extends FunctionRegistry {
 	 * Enhanced function calling with instant readiness (no polling!)
 	 */
 	async callFunctionWithInstantReadiness(functionName: string, workflowId: string, parameters: any, item: any, timeout: number = 10000): Promise<any> {
+		console.log(`🚀🚀🚀 ENHANCED: callFunctionWithInstantReadiness CALLED`)
+		console.log(`🚀🚀🚀 ENHANCED: Function name: ${functionName}`)
+		console.log(`🚀🚀🚀 ENHANCED: Workflow ID: ${workflowId}`)
+		console.log(`🚀🚀🚀 ENHANCED: Timeout: ${timeout}ms`)
 		logger.log(`🚀 ENHANCED: Calling ${functionName} with instant readiness check`)
 
+		console.log(`🚀🚀🚀 ENHANCED: About to call coordinator.waitForWorkerAvailability...`)
 		// Wait for worker availability (instant via pub/sub)
 		const workerInfo = await this.coordinator.waitForWorkerAvailability(functionName, workflowId, timeout)
+		console.log(`🚀🚀🚀 ENHANCED: Worker availability check completed`)
+		console.log(`🚀🚀🚀 ENHANCED: Worker info:`, workerInfo)
 		logger.log(`🚀 ENHANCED: Worker ready instantly: ${workerInfo.workerId}`)
 
 		// Execute call via streams (existing functionality)
@@ -80,11 +87,19 @@ export class EnhancedFunctionRegistry extends FunctionRegistry {
 		const streamKey = `function_calls:${functionName}:${workflowId}`
 		const responseChannel = `function:response:${callId}`
 
+		console.log(`🚀🚀🚀 ENHANCED: Generated call ID: ${callId}`)
+		console.log(`🚀🚀🚀 ENHANCED: Stream key: ${streamKey}`)
+		console.log(`🚀🚀🚀 ENHANCED: Response channel: ${responseChannel}`)
+
+		console.log(`🚀🚀🚀 ENHANCED: About to add call to stream...`)
 		// Add call to stream
 		await this.addCall(streamKey, callId, functionName, parameters, item, responseChannel)
+		console.log(`🚀🚀🚀 ENHANCED: Call added to stream successfully`)
 
+		console.log(`🚀🚀🚀 ENHANCED: About to wait for response (infinite wait)...`)
 		// Wait for response (existing functionality)
 		const response = await this.waitForResponse(responseChannel, 0) // 0 = infinite wait
+		console.log(`🚀🚀🚀 ENHANCED: Response received:`, response)
 
 		return response
 	}
