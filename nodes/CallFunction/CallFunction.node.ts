@@ -381,7 +381,13 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		console.log("🚀🚀🚀 CALLFUNCTION: EXECUTE METHOD CALLED")
+		// ALWAYS LOG WHEN CALLFUNCTION STARTS - NO MATTER WHAT
+		console.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION STARTED =====")
+		console.log("🔥🔥🔥 CALLFUNCTION: CallFunction node is now executing")
+		console.log("🔥🔥🔥 CALLFUNCTION: Timestamp:", new Date().toISOString())
+		logger.log(`🔥🔥🔥 CALLFUNCTION: ===== EXECUTION STARTED =====`)
+
+		console.log("�🚀🚀 CALLFUNCTION: EXECUTE METHOD CALLED")
 		logger.log(`🚀🚀🚀 CALLFUNCTION: Starting execution`)
 		const items = this.getInputData()
 		console.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
@@ -912,7 +918,13 @@ export class CallFunction implements INodeType {
 			}
 		}
 
-		logger.log("🔧 CallFunction: Returning data =", returnData)
+		console.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION COMPLETED =====")
+		console.log("🔥🔥🔥 CALLFUNCTION: CallFunction node execution finished")
+		console.log("🔥🔥🔥 CALLFUNCTION: Timestamp:", new Date().toISOString())
+		console.log("🔥🔥🔥 CALLFUNCTION: Returning", returnData.length, "items")
+		logger.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION COMPLETED =====")
+
+		logger.log("� CallFunction: Returning data =", returnData)
 		return [returnData]
 	}
 }

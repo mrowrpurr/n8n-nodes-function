@@ -121,11 +121,20 @@ export class WorkerCoordinator {
 
 		// No healthy workers available - wait for instant notification
 		console.log(`🎯🎯🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
+		console.log(`🎯🎯🎯 COORDINATOR: This usually means the Function node is restarting after workflow save`)
+		console.log(`🎯🎯🎯 COORDINATOR: Will wait up to ${timeout}ms for Function node to come online`)
 		console.log(`🎯🎯🎯 COORDINATOR: About to call readinessWatcher.waitForFunction...`)
 		logger.log(`🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
-		const result = await this.readinessWatcher.waitForFunction(functionName, workflowId, timeout)
-		console.log(`🎯🎯🎯 COORDINATOR: readinessWatcher.waitForFunction completed:`, result)
-		return result
+
+		try {
+			const result = await this.readinessWatcher.waitForFunction(functionName, workflowId, timeout)
+			console.log(`🎯🎯🎯 COORDINATOR: readinessWatcher.waitForFunction completed:`, result)
+			return result
+		} catch (error) {
+			console.log(`🎯🎯🎯 COORDINATOR: ERROR in readinessWatcher.waitForFunction:`, error)
+			console.log(`🎯🎯🎯 COORDINATOR: This likely means Function node didn't come online within ${timeout}ms`)
+			throw error
+		}
 	}
 
 	/**

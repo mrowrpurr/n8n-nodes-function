@@ -45,9 +45,21 @@ export class FunctionReadinessWatcher {
 
 		const promise = new Promise<WorkerInfo>((resolve, reject) => {
 			console.log(`👀👀👀 WATCHER: Creating promise for ${functionName}`)
+			console.log(`👀👀👀 WATCHER: This means CallFunction is waiting for Function node to come online`)
+			console.log(`👀👀👀 WATCHER: You should see this when Function node is restarting after workflow save`)
+
+			// Add progress logging every 2 seconds
+			let progressCount = 0
+			const progressInterval = setInterval(() => {
+				progressCount += 2
+				console.log(`👀👀👀 WATCHER: Still waiting for ${functionName}... (${progressCount}s/${timeout / 1000}s)`)
+				console.log(`👀👀👀 WATCHER: Function node may still be starting up after workflow save`)
+			}, 2000)
 
 			const timeoutId = setTimeout(() => {
 				console.log(`👀👀👀 WATCHER: TIMEOUT REACHED for ${functionName} after ${timeout}ms`)
+				console.log(`👀👀👀 WATCHER: Function node never came online - check if workflow is active`)
+				clearInterval(progressInterval)
 				this.cleanup(key)
 				reject(new Error(`Function ${functionName} not ready after ${timeout}ms`))
 			}, timeout)
@@ -55,9 +67,11 @@ export class FunctionReadinessWatcher {
 			console.log(`👀👀👀 WATCHER: Timeout set for ${timeout}ms`)
 
 			const listener: NotificationListener = (message: any) => {
-				console.log(`👀👀👀 WATCHER: RECEIVED NOTIFICATION for ${functionName}:`, message)
+				console.log(`👀👀👀 WATCHER: 🎉 RECEIVED NOTIFICATION for ${functionName}:`, message)
+				console.log(`👀👀👀 WATCHER: Function node is now online and ready!`)
 				logger.log(`👀 WATCHER: Received ready notification for ${functionName}:`, message)
 				clearTimeout(timeoutId)
+				clearInterval(progressInterval)
 				this.cleanup(key)
 				resolve({
 					workerId: message.workerId,
@@ -76,16 +90,19 @@ export class FunctionReadinessWatcher {
 			// Subscribe to ready channel
 			const channel = `function:ready:${functionName}:${workflowId}`
 			console.log(`👀👀👀 WATCHER: About to subscribe to channel: ${channel}`)
+			console.log(`👀👀👀 WATCHER: Waiting for Function node to publish ready notification...`)
 
 			this.notificationManager
 				.subscribe(channel, listener)
 				.then(() => {
-					console.log(`👀👀👀 WATCHER: Successfully subscribed to ${channel}`)
+					console.log(`👀👀👀 WATCHER: ✅ Successfully subscribed to ${channel}`)
+					console.log(`👀👀👀 WATCHER: Now listening for Function node ready notifications`)
 				})
 				.catch((error) => {
-					console.log(`👀👀👀 WATCHER: FAILED to subscribe to ${channel}:`, error)
+					console.log(`👀👀👀 WATCHER: ❌ FAILED to subscribe to ${channel}:`, error)
 					logger.error(`👀 WATCHER: Failed to subscribe to ${channel}:`, error)
 					clearTimeout(timeoutId)
+					clearInterval(progressInterval)
 					this.cleanup(key)
 					reject(error)
 				})

@@ -29,7 +29,7 @@ export class ConsumerLifecycleManager {
 	private consumerId: string | null = null
 	private isRunning: boolean = false
 	private processingLoop: Promise<void> | null = null
-	private readonly BLOCK_TIME = 5000 // 5 seconds
+	private readonly BLOCK_TIME = 100 // 100ms for near-instant processing
 	private readonly RETRY_DELAY = 1000 // 1 second
 	private readonly PROCESSING_TIMEOUT = 30000 // 30 seconds
 
@@ -261,6 +261,9 @@ export class ConsumerLifecycleManager {
 		}
 
 		try {
+			const readStartTime = Date.now()
+			console.log(`🚀🚀🚀 CONSUMER: About to read from stream with BLOCK_TIME=${this.BLOCK_TIME}ms`)
+
 			// Read messages from stream
 			const result = await this.client.xReadGroup(
 				this.config.groupName,
@@ -277,25 +280,34 @@ export class ConsumerLifecycleManager {
 				}
 			)
 
+			const readDuration = Date.now() - readStartTime
+			console.log(`🚀🚀🚀 CONSUMER: Stream read completed in ${readDuration}ms`)
+
 			if (!result || result.length === 0) {
 				// No messages, continue loop
+				console.log(`🚀🚀🚀 CONSUMER: No messages received, continuing loop`)
 				return
 			}
 
+			console.log(`🚀🚀🚀 CONSUMER: Received ${result.length} streams with messages`)
+
 			// Process each message
 			for (const stream of result) {
+				console.log(`🚀🚀🚀 CONSUMER: Processing stream with ${stream.messages.length} messages`)
 				for (const message of stream.messages) {
 					if (!this.isRunning) {
 						logger.log("🔄 LIFECYCLE: Consumer stopping, skipping message processing")
 						return
 					}
 
+					console.log(`🚀🚀🚀 CONSUMER: Processing message ${message.id}`)
 					await this.processMessage(message.id, message.message)
 				}
 			}
 		} catch (error) {
 			// Only log error if we're still running (not a shutdown error)
 			if (this.isRunning) {
+				console.log(`🚀🚀🚀 CONSUMER: ERROR reading from stream:`, error)
 				logger.error("🔄 LIFECYCLE: ❌ Error reading from stream:", error)
 			}
 			throw error
