@@ -160,6 +160,9 @@ export class Function implements INodeType {
 			}
 		}
 
+		logger.log("🚀 FUNCTION: ========================================")
+		logger.log("🚀 FUNCTION: trigger() called by n8n")
+		logger.log("🚀 FUNCTION: This happens during workflow activation or restart")
 		logger.log("🚀 FUNCTION: Starting Function node trigger")
 		logger.log("🚀 FUNCTION: Function name:", functionName)
 
@@ -270,6 +273,7 @@ export class Function implements INodeType {
 			if (workerId && registry instanceof EnhancedFunctionRegistry) {
 				await registry.registerWorkerWithInstantNotification(workerId, functionName, workflowId)
 				logger.log("🚀 FUNCTION: ✅ Worker registered with instant notifications:", workerId)
+				logger.log("🚀 FUNCTION: ✅ Worker is now available for CallFunction to find")
 
 				// Start periodic health updates (every 10 seconds)
 				healthUpdateInterval = setInterval(async () => {
@@ -289,7 +293,10 @@ export class Function implements INodeType {
 
 			return {
 				closeFunction: async () => {
-					logger.log("🚀 FUNCTION: Starting clean shutdown...")
+					logger.log("🚀 FUNCTION: ========================================")
+					logger.log("🚀 FUNCTION: closeFunction() called by n8n")
+					logger.log("🚀 FUNCTION: This happens during workflow changes or deactivation")
+					logger.log("🚀 FUNCTION: Starting lightweight shutdown (like Redis trigger)...")
 					logger.log(`🚀 FUNCTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
@@ -300,44 +307,20 @@ export class Function implements INodeType {
 							logger.log("🚀 FUNCTION: ✅ Health updates stopped")
 						}
 
-						// CRITICAL: Enhanced cleanup to prevent multiple simultaneous workers
-						if (registry) {
-							// First, unregister current worker immediately
-							if (workerId) {
-								try {
-									await registry.unregisterWorker(workerId, functionName)
-									logger.log("🚀 FUNCTION: ✅ Current worker unregistered immediately")
-								} catch (error) {
-									logger.warn("🚀 FUNCTION: ⚠️ Failed to unregister current worker:", error)
-								}
-							}
-
-							// Then clean up any other stale workers to prevent accumulation
-							try {
-								const cleanedCount = await registry.cleanupStaleWorkers(functionName)
-								if (cleanedCount > 0) {
-									logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} additional stale workers during shutdown`)
-								}
-							} catch (cleanupError) {
-								logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up stale workers:", cleanupError)
-							}
-
-							// CRITICAL: Add a small delay to ensure cleanup completes before n8n restarts us
-							await new Promise((resolve) => setTimeout(resolve, 100))
-							logger.log("🚀 FUNCTION: ✅ Cleanup delay completed - ready for clean restart")
-						}
-
 						// Stop the lifecycle manager - cleanly shuts down Redis consumer
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
 							logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager stopped")
 						}
 
-						// Note: We don't unregister the function itself - n8n will restart us
-						logger.log("🚀 FUNCTION: ✅ Clean shutdown complete - ready for restart")
+						// LIGHTWEIGHT SHUTDOWN: Don't unregister workers or clean registry
+						// This keeps the worker registered as healthy so CallFunction can find it
+						// when n8n restarts this Function node after workflow changes
+						logger.log("🚀 FUNCTION: ✅ Lightweight shutdown complete - worker stays registered for restart")
+						logger.log("🚀 FUNCTION: Worker remains available in registry for CallFunction to find")
 					} catch (error) {
-						logger.error("🚀 FUNCTION: ❌ Error during clean shutdown:", error)
-						// Even if cleanup fails, don't prevent n8n from restarting us
+						logger.error("🚀 FUNCTION: ❌ Error during lightweight shutdown:", error)
+						// Even if cleanup fails, don't prevent n8n from continuing
 					}
 				},
 			}
