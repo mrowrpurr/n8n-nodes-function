@@ -658,6 +658,12 @@ export class FunctionRegistry {
 	 * Acknowledge call (for ReturnFromFunction compatibility)
 	 */
 	async acknowledgeCall(streamKey: string, groupName: string, messageId: string): Promise<void> {
+		// Skip acknowledgment if messageId is undefined or invalid
+		if (!messageId || messageId === "undefined") {
+			logger.warn("🏗️ REGISTRY: ⚠️ Skipping acknowledgment - invalid messageId:", messageId)
+			return
+		}
+
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
 				await client.xAck(streamKey, groupName, messageId)

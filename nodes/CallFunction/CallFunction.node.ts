@@ -528,12 +528,12 @@ export class CallFunction implements INodeType {
 					// Add retry logic to handle race conditions during workflow save/restart
 					let availableWorkers = await registry.getAvailableWorkers(functionName)
 					let retryCount = 0
-					const maxRetries = 6 // Increased from 3 to 6
-					const retryDelay = 1000 // 1 second (total 6 seconds)
+					const maxRetries = 4 // Optimized: 4 retries for 4 seconds total
+					const retryDelay = 1000 // 1 second (total 4 seconds)
 
 					while (availableWorkers.length === 0 && retryCount < maxRetries) {
 						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)
-						logger.log(`🔄 CallFunction: This is normal during workflow save/restart - Function node may take up to 6 seconds to restart`)
+						logger.log(`🔄 CallFunction: This is normal during workflow save/restart - Function node may take up to 4 seconds to restart`)
 
 						await new Promise((resolve) => setTimeout(resolve, retryDelay))
 						availableWorkers = await registry.getAvailableWorkers(functionName)
