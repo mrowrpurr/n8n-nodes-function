@@ -52,21 +52,21 @@ await Promise.race([
 ## Implementation Tasks
 
 ### Phase 1: Add Wake-Up Notifications ⭐ HIGH IMPACT
-- [ ] **1.1** Add wake-up pub/sub to CallFunction execution path
-- [ ] **1.2** Add wake-up listener to Function node consumer loop  
-- [ ] **1.3** Test: Function calls still process instantly
-- [ ] **1.4** Increase BLOCK_TIME to 30 seconds
-- [ ] **1.5** Verify: 99.7% reduction in idle Redis traffic
+- [x] **1.1** Add wake-up pub/sub to CallFunction execution path
+- [x] **1.2** Add wake-up listener to Function node consumer loop
+- [x] **1.3** Test: Function calls still process instantly
+- [x] **1.4** Increase BLOCK_TIME to 30 seconds
+- [x] **1.5** Verify: 99.7% reduction in idle Redis traffic
 
-### Phase 2: Add Shutdown Notifications ⭐ HIGH IMPACT  
-- [ ] **2.1** Add shutdown pub/sub to Function node restart sequence
-- [ ] **2.2** Add shutdown listener to Function node consumer loop
-- [ ] **2.3** Test: Workflow saves restart Function nodes instantly
-- [ ] **2.4** Test: Frequent saves (10/minute) work perfectly
+### Phase 2: Add Shutdown Notifications ⭐ HIGH IMPACT
+- [x] **2.1** Add shutdown pub/sub to Function node restart sequence
+- [x] **2.2** Add shutdown listener to Function node consumer loop
+- [x] **2.3** Test: Workflow saves restart Function nodes instantly
+- [x] **2.4** Test: Frequent saves (10/minute) work perfectly
 
 ### Phase 3: Optimization & Monitoring 🔧 NICE TO HAVE
-- [ ] **3.1** Add Redis traffic monitoring/metrics
-- [ ] **3.2** Add pub/sub delivery metrics  
+- [x] **3.1** Add Redis traffic monitoring/metrics
+- [x] **3.2** Add pub/sub delivery metrics
 - [ ] **3.3** Consider progressive backoff (100ms → 30s when idle)
 - [ ] **3.4** Add Redis connection health monitoring
 

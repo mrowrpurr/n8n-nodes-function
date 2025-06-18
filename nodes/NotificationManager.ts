@@ -1,6 +1,6 @@
 import { RedisConnectionManager } from "./RedisConnectionManager"
 import { functionRegistryLogger as logger } from "./Logger"
-import { REDIS_KEY_PREFIX } from "./FunctionRegistry"
+import { REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 
 export type NotificationListener = (message: any) => void
 
@@ -14,6 +14,13 @@ export class NotificationManager {
 	private publisherClient: any | null = null
 	private subscriberClient: any | null = null
 	private isShuttingDown = false
+
+	// Pub/sub delivery metrics for Phase 3
+	private publishCount: number = 0
+	private subscriptionCount: number = 0
+	private messageDeliveryCount: number = 0
+	private lastMetricsReport: number = Date.now()
+	private readonly METRICS_REPORT_INTERVAL = 60000 // Report every 60 seconds
 
 	constructor(connectionManager: RedisConnectionManager) {
 		this.connectionManager = connectionManager
@@ -67,11 +74,16 @@ export class NotificationManager {
 					try {
 						listener(parsedMessage)
 						console.log(`📢📢📢 NOTIFICATIONS: Listener called successfully`)
+
+						// Track successful message delivery
+						this.messageDeliveryCount++
 					} catch (error) {
 						console.log(`📢📢📢 NOTIFICATIONS: ERROR in listener:`, error)
 						logger.error(`📢 NOTIFICATIONS: Error in listener for ${channel}:`, error)
 					}
 				})
+
+				this.reportMetricsIfNeeded()
 			} else {
 				console.log(`📢📢📢 NOTIFICATIONS: No listeners found for channel ${channel}`)
 			}
@@ -98,6 +110,10 @@ export class NotificationManager {
 		console.log(`📢📢📢 NOTIFICATIONS: About to publish to Redis...`)
 		await this.publisherClient!.publish(channel, messageStr)
 		console.log(`📢📢📢 NOTIFICATIONS: Published to Redis successfully`)
+
+		// Track metrics
+		this.publishCount++
+		this.reportMetricsIfNeeded()
 
 		logger.log(`📢 NOTIFICATIONS: Published to ${channel}:`, message)
 	}
@@ -205,6 +221,26 @@ export class NotificationManager {
 					logger.log(`📢 NOTIFICATIONS: Unsubscribed from channel: ${channel}`)
 				}
 			}
+		}
+	}
+
+	/**
+	 * Report pub/sub delivery metrics for monitoring
+	 */
+	private reportMetricsIfNeeded(): void {
+		const now = Date.now()
+		const timeSinceLastReport = now - this.lastMetricsReport
+
+		if (timeSinceLastReport >= this.METRICS_REPORT_INTERVAL) {
+			const publishRate = this.publishCount / (timeSinceLastReport / 1000)
+			const deliveryRate = this.messageDeliveryCount / (timeSinceLastReport / 1000)
+
+			logger.log(`📊 PUB/SUB METRICS: Published ${publishRate.toFixed(2)} msgs/sec, Delivered ${deliveryRate.toFixed(2)} msgs/sec, Active subscriptions: ${this.subscriptionCount}`)
+
+			// Reset counters
+			this.publishCount = 0
+			this.messageDeliveryCount = 0
+			this.lastMetricsReport = now
 		}
 	}
 

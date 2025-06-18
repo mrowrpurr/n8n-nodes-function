@@ -36,6 +36,11 @@ export class ConsumerLifecycleManager {
 	private notificationManager: NotificationManager | null = null
 	private wakeUpReceived: boolean = false
 
+	// Traffic monitoring for Phase 3
+	private redisOperationCount: number = 0
+	private lastTrafficReport: number = Date.now()
+	private readonly TRAFFIC_REPORT_INTERVAL = 60000 // Report every 60 seconds
+
 	constructor(
 		private config: ConsumerConfig,
 		private redisConfig: RedisConfig,
@@ -89,6 +94,20 @@ export class ConsumerLifecycleManager {
 
 				await this.notificationManager.subscribeToWakeUp(wakeUpListener)
 				logger.log("🔄 LIFECYCLE: ✅ Subscribed to wake-up notifications - will respond instantly to function calls")
+
+				// Also subscribe to shutdown notifications for coordinated restarts
+				logger.log("🔄 LIFECYCLE: Subscribing to shutdown notifications for coordinated restarts")
+				const shutdownListener: NotificationListener = (message: any) => {
+					if (message.type === "function-restart" && message.workflowId === this.config.scope) {
+						console.log(`📢📢📢 CONSUMER: SHUTDOWN NOTIFICATION received for workflow ${this.config.scope}!`)
+						logger.log(`📢🔄 LIFECYCLE: Shutdown notification received - reason: ${message.reason}`)
+						// Note: This could be used for coordinated shutdown in the future
+						// For now, just log it for monitoring
+					}
+				}
+
+				await this.notificationManager.subscribeToShutdown(shutdownListener)
+				logger.log("🔄 LIFECYCLE: ✅ Subscribed to shutdown notifications - will detect coordinated restarts")
 			} else {
 				logger.log("🔄 LIFECYCLE: No notification manager - using 30-second polling only")
 			}
@@ -307,6 +326,10 @@ export class ConsumerLifecycleManager {
 				}
 			)
 
+			// Track Redis operation for monitoring
+			this.redisOperationCount++
+			this.reportTrafficIfNeeded()
+
 			if (!result || result.length === 0) {
 				// No messages
 				if (useNonBlocking) {
@@ -425,6 +448,25 @@ export class ConsumerLifecycleManager {
 			logger.log("🔄 LIFECYCLE: ✅ Cleanup completed")
 		} catch (error) {
 			logger.error("🔄 LIFECYCLE: ❌ Error during cleanup:", error)
+		}
+	}
+
+	/**
+	 * Report Redis traffic statistics for monitoring
+	 */
+	private reportTrafficIfNeeded(): void {
+		const now = Date.now()
+		const timeSinceLastReport = now - this.lastTrafficReport
+
+		if (timeSinceLastReport >= this.TRAFFIC_REPORT_INTERVAL) {
+			const operationsPerSecond = this.redisOperationCount / (timeSinceLastReport / 1000)
+			const hasNotifications = this.notificationManager ? "with wake-up" : "polling-only"
+
+			logger.log(`📊 TRAFFIC: Consumer ${this.consumerId} - ${operationsPerSecond.toFixed(2)} Redis ops/sec (${hasNotifications})`)
+
+			// Reset counters
+			this.redisOperationCount = 0
+			this.lastTrafficReport = now
 		}
 	}
 

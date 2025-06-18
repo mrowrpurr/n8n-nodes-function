@@ -246,6 +246,16 @@ export class Function implements INodeType {
 					logger.log(`🔒 PREVENTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
+						// STEP 0: Send shutdown notification to alert CallFunction nodes instantly
+						if (registry instanceof EnhancedFunctionRegistry) {
+							logger.log("🔒 PREVENTION: Step 0 - Sending shutdown notification for instant restart coordination")
+							const notificationManager = registry["notificationManager"]
+							if (notificationManager) {
+								await notificationManager.publishShutdown(workflowId, "workflow-save-restart")
+								logger.log("🔒 PREVENTION: ✅ Shutdown notification sent - CallFunction nodes alerted instantly")
+							}
+						}
+
 						// STEP 1: Stop accepting new messages immediately
 						logger.log("🔒 PREVENTION: Step 1 - Stopping health updates to signal unavailability")
 						if (healthUpdateInterval) {

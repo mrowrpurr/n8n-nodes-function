@@ -529,6 +529,25 @@ export class CallFunction implements INodeType {
 				const useRedisStreams = queueModeStatus
 				console.log("🚀🚀🚀 CALLFUNCTION: Use Redis streams =", useRedisStreams)
 
+				// Set up shutdown notification listener for instant restart detection
+				let shutdownDetected = false
+				if (enhancedRegistry instanceof EnhancedFunctionRegistry) {
+					const notificationManager = enhancedRegistry["notificationManager"]
+					if (notificationManager) {
+						console.log("🚀🚀🚀 CALLFUNCTION: Setting up shutdown notification listener...")
+						const shutdownListener = (message: any) => {
+							if (message.type === "function-restart" && message.workflowId === workflowId) {
+								console.log(`📢📢📢 CALLFUNCTION: SHUTDOWN NOTIFICATION received for workflow ${workflowId}!`)
+								logger.log(`📢🚀 CALLFUNCTION: Function restart detected for workflow ${workflowId} - reason: ${message.reason}`)
+								shutdownDetected = true
+							}
+						}
+
+						await notificationManager.subscribeToShutdown(shutdownListener)
+						logger.log("🚀 CALLFUNCTION: ✅ Subscribed to shutdown notifications for instant restart detection")
+					}
+				}
+
 				if (useRedisStreams) {
 					console.log("🌊🌊🌊 CALLFUNCTION: USING REDIS STREAMS FOR FUNCTION CALL")
 					logger.log("🌊 CallFunction: Using Redis streams for function call with instant readiness")
@@ -634,12 +653,20 @@ export class CallFunction implements INodeType {
 					logger.log("🔄 CallFunction: Falling back to polling logic")
 					let availableWorkers = await registry.getAvailableWorkers(functionName)
 					let retryCount = 0
-					const maxRetries = 4
+					let maxRetries = 4
 					const retryDelay = 1000
 
+					// If shutdown was detected, extend retry period for restart
+					if (shutdownDetected) {
+						maxRetries = 8 // Double the retries when restart detected
+						logger.log("🔄 CallFunction: ⚡ Shutdown detected - extending retry period for Function node restart")
+					}
+
 					while (availableWorkers.length === 0 && retryCount < maxRetries) {
+						const retryMessage = shutdownDetected ? "Function node restarting after workflow save" : "Function node may take up to 4 seconds to restart"
+
 						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)
-						logger.log(`🔄 CallFunction: This is normal during workflow save/restart - Function node may take up to 4 seconds to restart`)
+						logger.log(`🔄 CallFunction: ${retryMessage}`)
 
 						await new Promise((resolve) => setTimeout(resolve, retryDelay))
 						availableWorkers = await registry.getAvailableWorkers(functionName)
