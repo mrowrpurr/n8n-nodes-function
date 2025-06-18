@@ -78,7 +78,7 @@ export class RedisConnectionManager {
 	/**
 	 * Create a new Redis client
 	 */
-	private async createClient(clientId: string): Promise<any> {
+	async createClient(clientId: string): Promise<any> {
 		logger.log("🔗 REDIS: Creating new client:", clientId)
 
 		try {

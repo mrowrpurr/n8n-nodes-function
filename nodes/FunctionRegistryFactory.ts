@@ -1,4 +1,5 @@
 import { FunctionRegistry } from "./FunctionRegistry"
+import { EnhancedFunctionRegistry } from "./EnhancedFunctionRegistry"
 import { functionRegistryFactoryLogger as logger } from "./Logger"
 
 // Redis configuration interface
@@ -74,6 +75,27 @@ export async function getFunctionRegistry(): Promise<FunctionRegistry> {
 			ssl: false,
 		}
 		return FunctionRegistry.getInstance(dummyConfig)
+	}
+}
+
+export async function getEnhancedFunctionRegistry(): Promise<EnhancedFunctionRegistry> {
+	logger.debug("Queue mode enabled =", queueModeEnabled)
+
+	if (queueModeEnabled && redisConfigOverride) {
+		logger.debug("Using Enhanced Redis-backed FunctionRegistry with pub/sub")
+		return EnhancedFunctionRegistry.getEnhancedInstance(redisConfigOverride)
+	} else {
+		logger.debug("Using Enhanced in-memory FunctionRegistry (Redis disabled)")
+		// For non-queue mode, we still need a registry but it won't use Redis
+		const dummyConfig: RedisConfig = {
+			host: "localhost",
+			port: 6379,
+			database: 0,
+			user: "",
+			password: "",
+			ssl: false,
+		}
+		return EnhancedFunctionRegistry.getEnhancedInstance(dummyConfig)
 	}
 }
 

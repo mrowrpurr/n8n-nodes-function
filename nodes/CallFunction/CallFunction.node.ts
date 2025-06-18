@@ -7,8 +7,9 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, getEnhancedFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
+import { EnhancedFunctionRegistry } from "../EnhancedFunctionRegistry"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -509,11 +510,12 @@ export class CallFunction implements INodeType {
 				logger.debug("🔍 CallFunction: Queue mode enabled =", queueModeStatus)
 
 				// In queue mode, also check if we have Redis configuration
-				const registry = await getFunctionRegistry()
+				const enhancedRegistry = await getEnhancedFunctionRegistry()
+				const registry = await getFunctionRegistry() // Keep original for fallback
 				const useRedisStreams = queueModeStatus
 
 				if (useRedisStreams) {
-					logger.log("🌊 CallFunction: Using Redis streams for function call")
+					logger.log("🌊 CallFunction: Using Redis streams for function call with instant readiness")
 
 					// Generate unique call ID
 					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -524,12 +526,74 @@ export class CallFunction implements INodeType {
 					logger.log("🌊 CallFunction: Stream key:", streamKey)
 					logger.log("🌊 CallFunction: Response channel:", responseChannel)
 
-					// Check if any workers are available for this function
-					// Add retry logic to handle race conditions during workflow save/restart
+					// Use enhanced registry for instant worker availability
+					if (enhancedRegistry instanceof EnhancedFunctionRegistry) {
+						logger.log("⚡ CallFunction: Using instant readiness check (no polling!)")
+
+						try {
+							// This will return instantly if workers are available, or wait for pub/sub notification
+							const response = await enhancedRegistry.callFunctionWithInstantReadiness(
+								functionName,
+								workflowId,
+								functionParameters,
+								item,
+								10000 // 10 second timeout
+							)
+
+							logger.log("⚡ CallFunction: Received instant response:", response)
+
+							// Process the response
+							if (!response.success) {
+								throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
+							}
+
+							// Start with the original item
+							let resultJson: any = { ...item.json }
+
+							// Always include the function result
+							if (response.data !== null) {
+								if (storeResponse && responseVariableName && responseVariableName.trim()) {
+									// Store under specific variable name
+									resultJson[responseVariableName] = response.data
+								} else {
+									// Default behavior: merge the function result directly into the item
+									if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
+										// If result is an object, merge its properties
+										resultJson = { ...resultJson, ...response.data }
+									} else {
+										// If result is not an object, store under 'result' key
+										resultJson.result = response.data
+									}
+								}
+							}
+
+							const resultItem: INodeExecutionData = {
+								json: resultJson,
+								index: itemIndex,
+								binary: item.binary,
+							}
+
+							logger.log("⚡ CallFunction: Created result item =", resultItem)
+							returnData.push(resultItem)
+							continue // Skip the old polling logic
+						} catch (error) {
+							if (error.message.includes("not ready after")) {
+								// Function didn't become ready in time
+								throw new NodeOperationError(
+									this.getNode(),
+									`Function '${functionName}' not available. This usually means the Function node is not running or the workflow containing the Function node is not active.`
+								)
+							}
+							throw error
+						}
+					}
+
+					// Fallback to original polling logic if not using enhanced registry
+					logger.log("🔄 CallFunction: Falling back to polling logic")
 					let availableWorkers = await registry.getAvailableWorkers(functionName)
 					let retryCount = 0
-					const maxRetries = 4 // Optimized: 4 retries for 4 seconds total
-					const retryDelay = 1000 // 1 second (total 4 seconds)
+					const maxRetries = 4
+					const retryDelay = 1000
 
 					while (availableWorkers.length === 0 && retryCount < maxRetries) {
 						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)

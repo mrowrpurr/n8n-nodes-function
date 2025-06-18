@@ -1,9 +1,10 @@
 import { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription, ITriggerFunctions, ITriggerResponse, NodeOperationError, NodeConnectionType } from "n8n-workflow"
 
 import { functionRegistryLogger as logger } from "../Logger"
-import { isQueueModeEnabled, getRedisConfig, getFunctionRegistry } from "../FunctionRegistryFactory"
+import { isQueueModeEnabled, getRedisConfig, getEnhancedFunctionRegistry } from "../FunctionRegistryFactory"
 import { ConsumerLifecycleManager, ConsumerConfig } from "../ConsumerLifecycleManager"
 import { RedisConnectionManager } from "../RedisConnectionManager"
+import { EnhancedFunctionRegistry } from "../EnhancedFunctionRegistry"
 
 export class Function implements INodeType {
 	description: INodeTypeDescription = {
@@ -181,8 +182,8 @@ export class Function implements INodeType {
 			}
 
 			// Register function in registry so CallFunction can find it
-			registry = await getFunctionRegistry()
-			await registry.registerFunctionWithCleanup({
+			registry = await getEnhancedFunctionRegistry()
+			await registry.registerFunctionWithNotification({
 				name: functionName,
 				scope: workflowId,
 				code: "", // No code - this is a workflow trigger
@@ -190,18 +191,18 @@ export class Function implements INodeType {
 				workflowId: workflowId,
 				nodeId: this.getNode().id,
 			})
-			logger.log("🚀 FUNCTION: ✅ Function registered in registry")
+			logger.log("🚀 FUNCTION: ✅ Function registered in registry with instant notifications")
 
 			// Create and start lifecycle manager
 			lifecycleManager = new ConsumerLifecycleManager(consumerConfig, redisConfig, messageHandler)
 
 			await lifecycleManager.start()
 
-			// CRITICAL: Register this node as a worker for the function with duplicate detection
+			// CRITICAL: Register this node as a worker for the function with instant notifications
 			workerId = lifecycleManager.getConsumerId()
-			if (workerId) {
-				await registry.registerWorkerWithDuplicateDetection(workerId, functionName)
-				logger.log("🚀 FUNCTION: ✅ Worker registered:", workerId)
+			if (workerId && registry instanceof EnhancedFunctionRegistry) {
+				await registry.registerWorkerWithInstantNotification(workerId, functionName, workflowId)
+				logger.log("🚀 FUNCTION: ✅ Worker registered with instant notifications:", workerId)
 
 				// Start periodic health updates (every 10 seconds)
 				healthUpdateInterval = setInterval(async () => {
@@ -244,9 +245,15 @@ export class Function implements INodeType {
 						logger.log("🔒 PREVENTION: Step 3 - Waiting 2 seconds for in-flight messages to complete")
 						await new Promise((resolve) => setTimeout(resolve, 2000))
 
-						// STEP 4: Check for any remaining workers before unregistering
-						if (workerId && registry) {
-							logger.log("🔒 PREVENTION: Step 4 - Checking for duplicate workers before cleanup")
+						// STEP 4: Use enhanced coordinator for graceful shutdown
+						if (workerId && registry instanceof EnhancedFunctionRegistry) {
+							logger.log("🔒 PREVENTION: Step 4 - Using enhanced coordinator for graceful shutdown")
+							await registry.coordinateShutdown(functionName, workflowId, workerId)
+							logger.log("🔒 PREVENTION: ✅ Coordinated shutdown complete")
+						} else if (workerId && registry) {
+							// Fallback to original shutdown sequence
+							logger.log("🔒 PREVENTION: Step 4 - Using standard shutdown (fallback)")
+
 							const diagnostics = await registry.listAllWorkersAndFunctions()
 							const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
 							logger.log(`🔒 PREVENTION: Found ${myWorkers.length} total workers for function ${functionName}:`)
@@ -254,27 +261,14 @@ export class Function implements INodeType {
 								logger.log(`🔒 PREVENTION:   - Worker ${w.workerId}: ${w.isHealthy ? "healthy" : "stale"} (last seen: ${w.lastSeen})`)
 							})
 
-							// Log what would be garbage collected
-							const wouldGC = diagnostics.wouldGC.filter((item: any) => item.type === "worker" && item.functionName === functionName)
-							if (wouldGC.length > 0) {
-								logger.log(`🧹 PREVENTION: Would GC ${wouldGC.length} stale workers:`)
-								wouldGC.forEach((item: any) => {
-									logger.log(`🧹 PREVENTION:   - ${item.workerId}: ${item.reason}`)
-								})
-							}
-
 							// Unregister this specific worker
 							await registry.unregisterWorker(workerId, functionName)
 							logger.log("🔒 PREVENTION: ✅ Worker unregistered:", workerId)
-						}
 
-						// STEP 5: Wait another moment before function cleanup
-						logger.log("🔒 PREVENTION: Step 5 - Waiting 1 second before function cleanup")
-						await new Promise((resolve) => setTimeout(resolve, 1000))
+							// Wait before function cleanup
+							await new Promise((resolve) => setTimeout(resolve, 1000))
 
-						// STEP 6: Unregister function from registry
-						if (registry) {
-							logger.log("🔒 PREVENTION: Step 6 - Unregistering function from registry")
+							// Unregister function from registry
 							await registry.unregisterFunction(functionName, workflowId)
 							logger.log("🔒 PREVENTION: ✅ Function unregistered:", functionName)
 						}
