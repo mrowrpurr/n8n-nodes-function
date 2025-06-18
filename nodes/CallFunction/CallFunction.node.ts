@@ -7,7 +7,7 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, getEnhancedFunctionRegistry, isQueueModeEnabled } from "../FunctionRegistryFactory"
+import { getFunctionRegistry, getEnhancedFunctionRegistry, isQueueModeEnabled, REDIS_KEY_PREFIX } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
 import { EnhancedFunctionRegistry } from "../EnhancedFunctionRegistry"
 
@@ -535,8 +535,8 @@ export class CallFunction implements INodeType {
 
 					// Generate unique call ID
 					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-					const responseChannel = `function:response:${callId}`
-					const streamKey = `function_calls:${functionName}:${workflowId}`
+					const responseChannel = `${REDIS_KEY_PREFIX}function:response:${callId}`
+					const streamKey = `${REDIS_KEY_PREFIX}function_calls:${functionName}:${workflowId}`
 
 					console.log("🌊 CALLFUNCTION: Call ID:", callId)
 					console.log("🌊 CALLFUNCTION: Stream key:", streamKey)
@@ -745,7 +745,7 @@ export class CallFunction implements INodeType {
 					logger.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
 
 					// Check if stream is ready before making the call
-					const groupName = `function_group:${functionName}:${workflowId}`
+					const groupName = `${REDIS_KEY_PREFIX}function_group:${functionName}:${workflowId}`
 					logger.log("🔍 DIAGNOSTIC: Checking if stream is ready")
 					logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
 					logger.log("🔍 DIAGNOSTIC: Group name:", groupName)

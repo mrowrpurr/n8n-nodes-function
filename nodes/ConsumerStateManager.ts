@@ -1,5 +1,5 @@
 import { createClient, RedisClientType } from "redis"
-import { isQueueModeEnabled, RedisConfig } from "./FunctionRegistryFactory"
+import { isQueueModeEnabled, RedisConfig, REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 
 export interface ConsumerState {
@@ -80,8 +80,8 @@ export class ConsumerStateManager {
 			errorCount: 0,
 		}
 
-		const stateKey = `consumer:state:${state.id}`
-		const activeKey = `consumer:active:${state.functionName}:${state.scope}`
+		const stateKey = `${REDIS_KEY_PREFIX}consumer:state:${state.id}`
+		const activeKey = `${REDIS_KEY_PREFIX}consumer:active:${state.functionName}:${state.scope}`
 
 		logger.log("🏗️ STATE: Registering consumer:", state.id)
 		logger.log("🏗️ STATE: Function:", state.functionName, "Scope:", state.scope)
@@ -132,7 +132,7 @@ export class ConsumerStateManager {
 	async updateConsumerStatus(consumerId: string, status: ConsumerState["status"], error?: string): Promise<void> {
 		if (!this.client) return
 
-		const stateKey = `consumer:state:${consumerId}`
+		const stateKey = `${REDIS_KEY_PREFIX}consumer:state:${consumerId}`
 
 		logger.log("🏗️ STATE: Updating consumer status:", consumerId, "->", status)
 
@@ -162,7 +162,7 @@ export class ConsumerStateManager {
 	async sendHeartbeat(consumerId: string): Promise<void> {
 		if (!this.client) return
 
-		const stateKey = `consumer:state:${consumerId}`
+		const stateKey = `${REDIS_KEY_PREFIX}consumer:state:${consumerId}`
 
 		try {
 			await this.client.hSet(stateKey, "lastHeartbeat", Date.now().toString())
@@ -203,7 +203,7 @@ export class ConsumerStateManager {
 	async getConsumerState(consumerId: string): Promise<ConsumerState | null> {
 		if (!this.client) return null
 
-		const stateKey = `consumer:state:${consumerId}`
+		const stateKey = `${REDIS_KEY_PREFIX}consumer:state:${consumerId}`
 
 		try {
 			const state = await this.client.hGetAll(stateKey)
@@ -237,7 +237,7 @@ export class ConsumerStateManager {
 	async getActiveConsumers(functionName: string, scope: string): Promise<ConsumerState[]> {
 		if (!this.client) return []
 
-		const activeKey = `consumer:active:${functionName}:${scope}`
+		const activeKey = `${REDIS_KEY_PREFIX}consumer:active:${functionName}:${scope}`
 
 		try {
 			const consumerIds = await this.client.sMembers(activeKey)
@@ -278,7 +278,7 @@ export class ConsumerStateManager {
 	async cleanupStaleConsumers(functionName: string, scope: string): Promise<number> {
 		if (!this.client) return 0
 
-		const activeKey = `consumer:active:${functionName}:${scope}`
+		const activeKey = `${REDIS_KEY_PREFIX}consumer:active:${functionName}:${scope}`
 		let cleanedCount = 0
 
 		try {
@@ -318,7 +318,7 @@ export class ConsumerStateManager {
 		try {
 			const state = await this.getConsumerState(consumerId)
 			if (state) {
-				const activeKey = `consumer:active:${state.functionName}:${state.scope}`
+				const activeKey = `${REDIS_KEY_PREFIX}consumer:active:${state.functionName}:${state.scope}`
 
 				// Remove from active set
 				await this.client.sRem(activeKey, consumerId)

@@ -1,5 +1,6 @@
 import { NotificationManager, NotificationListener } from "./NotificationManager"
 import { functionRegistryLogger as logger } from "./Logger"
+import { REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 
 export interface WorkerInfo {
 	workerId: string
@@ -88,7 +89,7 @@ export class FunctionReadinessWatcher {
 			console.log(`👀👀👀 WATCHER: Stored listener in activeListeners`)
 
 			// Subscribe to ready channel
-			const channel = `function:ready:${functionName}:${workflowId}`
+			const channel = `${REDIS_KEY_PREFIX}function:ready:${functionName}:${workflowId}`
 			console.log(`👀👀👀 WATCHER: About to subscribe to channel: ${channel}`)
 			console.log(`👀👀👀 WATCHER: Waiting for Function node to publish ready notification...`)
 
@@ -142,7 +143,7 @@ export class FunctionReadinessWatcher {
 		const listener = this.activeListeners.get(key)
 		if (listener) {
 			const [functionName, workflowId] = key.split(":")
-			const channel = `function:ready:${functionName}:${workflowId}`
+			const channel = `${REDIS_KEY_PREFIX}function:ready:${functionName}:${workflowId}`
 
 			try {
 				await this.notificationManager.unsubscribe(channel, listener)

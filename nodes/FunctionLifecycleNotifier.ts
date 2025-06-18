@@ -1,4 +1,5 @@
 import { NotificationManager } from "./NotificationManager"
+import { REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 
 /**
@@ -27,7 +28,7 @@ export class FunctionLifecycleNotifier {
 		console.log(`🚀🚀🚀 LIFECYCLE: Workflow ID: ${this.workflowId}`)
 		console.log(`🚀🚀🚀 LIFECYCLE: Worker ID: ${this.workerId}`)
 
-		const channel = `function:ready:${this.functionName}:${this.workflowId}`
+		const channel = `${REDIS_KEY_PREFIX}function:ready:${this.functionName}:${this.workflowId}`
 		const message = {
 			workerId: this.workerId,
 			functionName: this.functionName,
@@ -50,7 +51,7 @@ export class FunctionLifecycleNotifier {
 	 * Notify planned shutdown with estimated downtime
 	 */
 	async notifyShuttingDown(estimatedDowntime: number): Promise<void> {
-		const channel = `function:shutdown:${this.functionName}:${this.workflowId}`
+		const channel = `${REDIS_KEY_PREFIX}function:shutdown:${this.functionName}:${this.workflowId}`
 		const message = {
 			workerId: this.workerId,
 			functionName: this.functionName,
@@ -68,7 +69,7 @@ export class FunctionLifecycleNotifier {
 	 * Notify immediate offline status
 	 */
 	async notifyOffline(reason: string): Promise<void> {
-		const channel = `function:offline:${this.functionName}:${this.workflowId}`
+		const channel = `${REDIS_KEY_PREFIX}function:offline:${this.functionName}:${this.workflowId}`
 		const message = {
 			workerId: this.workerId,
 			functionName: this.functionName,

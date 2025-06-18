@@ -12,6 +12,9 @@ export interface RedisConfig {
 	ssl: boolean
 }
 
+// Redis key prefix for namespacing - ensures we're good Redis citizens
+export const REDIS_KEY_PREFIX = "n8n-nodes-function:"
+
 // Static configuration for Redis and queue mode
 let redisConfigOverride: RedisConfig | null = null
 let queueModeEnabled: boolean = false

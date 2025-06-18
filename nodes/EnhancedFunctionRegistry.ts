@@ -2,7 +2,7 @@ import { FunctionRegistry, FunctionDefinition } from "./FunctionRegistry"
 import { WorkerCoordinator } from "./WorkerCoordinator"
 import { NotificationManager } from "./NotificationManager"
 import { RedisConnectionManager } from "./RedisConnectionManager"
-import { RedisConfig } from "./FunctionRegistryFactory"
+import { RedisConfig, REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 
 /**
@@ -84,8 +84,8 @@ export class EnhancedFunctionRegistry extends FunctionRegistry {
 
 		// Execute call via streams (existing functionality)
 		const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-		const streamKey = `function_calls:${functionName}:${workflowId}`
-		const responseChannel = `function:response:${callId}`
+		const streamKey = `${REDIS_KEY_PREFIX}function_calls:${functionName}:${workflowId}`
+		const responseChannel = `${REDIS_KEY_PREFIX}function:response:${callId}`
 
 		console.log(`🚀🚀🚀 ENHANCED: Generated call ID: ${callId}`)
 		console.log(`🚀🚀🚀 ENHANCED: Stream key: ${streamKey}`)

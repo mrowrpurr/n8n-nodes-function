@@ -1,7 +1,7 @@
 import { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription, ITriggerFunctions, ITriggerResponse, NodeOperationError, NodeConnectionType } from "n8n-workflow"
 
 import { functionRegistryLogger as logger } from "../Logger"
-import { isQueueModeEnabled, getRedisConfig, getEnhancedFunctionRegistry } from "../FunctionRegistryFactory"
+import { isQueueModeEnabled, getRedisConfig, getEnhancedFunctionRegistry, REDIS_KEY_PREFIX } from "../FunctionRegistryFactory"
 import { ConsumerLifecycleManager, ConsumerConfig } from "../ConsumerLifecycleManager"
 import { RedisConnectionManager } from "../RedisConnectionManager"
 import { EnhancedFunctionRegistry } from "../EnhancedFunctionRegistry"
@@ -181,8 +181,8 @@ export class Function implements INodeType {
 			const consumerConfig: ConsumerConfig = {
 				functionName,
 				scope: workflowId,
-				streamKey: `function_calls:${functionName}:${workflowId}`,
-				groupName: `function_group:${functionName}:${workflowId}`,
+				streamKey: `${REDIS_KEY_PREFIX}function_calls:${functionName}:${workflowId}`,
+				groupName: `${REDIS_KEY_PREFIX}function_group:${functionName}:${workflowId}`,
 				processId: process.pid.toString(),
 				workerId: this.getInstanceId() || "unknown",
 			}
@@ -478,11 +478,11 @@ async function sendResult(callId: string, result: any, error: string | null): Pr
 			}
 
 			// Send to result stream
-			await client.xAdd(`function_results:${callId}`, "*", resultData)
+			await client.xAdd(`${REDIS_KEY_PREFIX}function_results:${callId}`, "*", resultData)
 
 			// Also set as a key for immediate retrieval
 			await client.setEx(
-				`result:${callId}`,
+				`${REDIS_KEY_PREFIX}result:${callId}`,
 				300,
 				JSON.stringify({
 					callId,

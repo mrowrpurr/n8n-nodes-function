@@ -1,4 +1,4 @@
-import { isQueueModeEnabled, RedisConfig } from "./FunctionRegistryFactory"
+import { isQueueModeEnabled, RedisConfig, REDIS_KEY_PREFIX } from "./FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "./Logger"
 import { RedisConnectionManager } from "./RedisConnectionManager"
 import { CircuitBreaker } from "./CircuitBreaker"
@@ -85,8 +85,8 @@ export class FunctionRegistry {
 
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const functionKey = `function:${definition.name}:${definition.scope}`
-				const registryKey = `registry:functions`
+				const functionKey = `${REDIS_KEY_PREFIX}function:${definition.name}:${definition.scope}`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 
 				// Store function definition
 				await client.hSet(functionKey, {
@@ -121,8 +121,8 @@ export class FunctionRegistry {
 
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const functionKey = `function:${functionName}:${scope}`
-				const registryKey = `registry:functions`
+				const functionKey = `${REDIS_KEY_PREFIX}function:${functionName}:${scope}`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 
 				// Remove from global registry
 				await client.sRem(registryKey, `${functionName}:${scope}`)
@@ -131,10 +131,10 @@ export class FunctionRegistry {
 				await client.del(functionKey)
 
 				// Clean up workers for this function
-				const workersKey = `workers:${functionName}`
+				const workersKey = `${REDIS_KEY_PREFIX}workers:${functionName}`
 				const workers = await client.sMembers(workersKey)
 				for (const workerId of workers) {
-					const workerKey = `worker:${workerId}:${functionName}`
+					const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 					await client.del(workerKey)
 				}
 				await client.del(workersKey)
@@ -154,13 +154,13 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const registryKey = `registry:functions`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 				const functionKeys = await client.sMembers(registryKey)
 				let cleanedCount = 0
 
 				for (const functionKey of functionKeys) {
 					const [name, scope] = functionKey.split(":")
-					const workersKey = `workers:${name}`
+					const workersKey = `${REDIS_KEY_PREFIX}workers:${name}`
 					const workers = await client.sMembers(workersKey)
 
 					// Check if any workers are healthy
@@ -196,13 +196,13 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const registryKey = `registry:functions`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 				const functionKeys = await client.sMembers(registryKey)
 				let cleanedCount = 0
 
 				for (const functionKey of functionKeys) {
 					const [name, scope] = functionKey.split(":")
-					const fullKey = `function:${name}:${scope}`
+					const fullKey = `${REDIS_KEY_PREFIX}function:${name}:${scope}`
 					const functionData = await client.hGetAll(fullKey)
 
 					// If this function belongs to the specified workflow, remove it
@@ -228,13 +228,13 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const registryKey = `registry:functions`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 				const functionKeys = await client.sMembers(registryKey)
 				const functions: Array<{ name: string; value: string; description: string }> = []
 
 				for (const functionKey of functionKeys) {
 					const [name, scope] = functionKey.split(":")
-					const fullKey = `function:${name}:${scope}`
+					const fullKey = `${REDIS_KEY_PREFIX}function:${name}:${scope}`
 					const functionData = await client.hGetAll(fullKey)
 
 					if (functionData && functionData.workflowId === workflowId) {
@@ -265,13 +265,13 @@ export class FunctionRegistry {
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
 				// Find function by name and workflow
-				const registryKey = `registry:functions`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 				const functionKeys = await client.sMembers(registryKey)
 
 				for (const functionKey of functionKeys) {
 					const [name, scope] = functionKey.split(":")
 					if (name === functionName) {
-						const fullKey = `function:${name}:${scope}`
+						const fullKey = `${REDIS_KEY_PREFIX}function:${name}:${scope}`
 						const functionData = await client.hGetAll(fullKey)
 
 						if (functionData && functionData.workflowId === workflowId) {
@@ -323,7 +323,7 @@ export class FunctionRegistry {
 
 				while (timeout === 0 || Date.now() - startTime < timeout) {
 					// Check for result in Redis key
-					const resultKey = `result:${responseChannel.replace("function:response:", "")}`
+					const resultKey = `${REDIS_KEY_PREFIX}result:${responseChannel.replace(`${REDIS_KEY_PREFIX}function:response:`, "")}`
 					const result = await client.get(resultKey)
 
 					if (result) {
@@ -365,7 +365,7 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const workersKey = `workers:${functionName}`
+				const workersKey = `${REDIS_KEY_PREFIX}workers:${functionName}`
 				const workers = await client.sMembers(workersKey)
 				logger.log("🏗️ REGISTRY: Available workers for", functionName, ":", workers)
 				return workers
@@ -383,8 +383,8 @@ export class FunctionRegistry {
 
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const workersKey = `workers:${functionName}`
-				const workerKey = `worker:${workerId}:${functionName}`
+				const workersKey = `${REDIS_KEY_PREFIX}workers:${functionName}`
+				const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 
 				// Add worker to the set
 				await client.sAdd(workersKey, workerId)
@@ -407,8 +407,8 @@ export class FunctionRegistry {
 
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const workersKey = `workers:${functionName}`
-				const workerKey = `worker:${workerId}:${functionName}`
+				const workersKey = `${REDIS_KEY_PREFIX}workers:${functionName}`
+				const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 
 				// Remove worker from the set
 				await client.sRem(workersKey, workerId)
@@ -431,7 +431,7 @@ export class FunctionRegistry {
 
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const workerKey = `worker:${workerId}:${functionName}`
+				const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 				await client.setEx(workerKey, this.WORKER_TIMEOUT / 1000, Date.now().toString())
 			}, `update-worker-health-${workerId}`)
 		}, `update-worker-health-${workerId}`)
@@ -447,7 +447,7 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const workerKey = `worker:${workerId}:${functionName}`
+				const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 				const lastSeen = await client.get(workerKey)
 
 				if (!lastSeen) {
@@ -505,12 +505,12 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const workersKey = `workers:${functionName}`
+				const workersKey = `${REDIS_KEY_PREFIX}workers:${functionName}`
 				const workers = await client.sMembers(workersKey)
 				let cleanedCount = 0
 
 				for (const workerId of workers) {
-					const workerKey = `worker:${workerId}:${functionName}`
+					const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
 					const lastSeen = await client.get(workerKey)
 
 					if (!lastSeen || Date.now() - parseInt(lastSeen) > timeout) {
@@ -536,8 +536,8 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const streamKey = `function_calls:${functionName}:${scope}`
-				const groupName = `function_group:${functionName}:${scope}`
+				const streamKey = `${REDIS_KEY_PREFIX}function_calls:${functionName}:${scope}`
+				const groupName = `${REDIS_KEY_PREFIX}function_group:${functionName}:${scope}`
 
 				try {
 					// Check if group exists
@@ -573,8 +573,8 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const streamKey = `function_calls:${functionName}:${scope}`
-				const groupName = `function_group:${functionName}:${scope}`
+				const streamKey = `${REDIS_KEY_PREFIX}function_calls:${functionName}:${scope}`
+				const groupName = `${REDIS_KEY_PREFIX}function_group:${functionName}:${scope}`
 
 				try {
 					// Ensure stream exists
@@ -643,7 +643,7 @@ export class FunctionRegistry {
 	async publishResponse(responseChannel: string, response: any): Promise<void> {
 		await this.circuitBreaker.execute(async () => {
 			await this.connectionManager.executeOperation(async (client) => {
-				const callId = responseChannel.replace("function:response:", "")
+				const callId = responseChannel.replace(`${REDIS_KEY_PREFIX}function:response:`, "")
 				const resultData = {
 					callId,
 					result: JSON.stringify(response.data),
@@ -652,7 +652,7 @@ export class FunctionRegistry {
 					status: response.success ? "success" : "error",
 				}
 
-				await client.setEx(`result:${callId}`, 300, JSON.stringify(resultData))
+				await client.setEx(`${REDIS_KEY_PREFIX}result:${callId}`, 300, JSON.stringify(resultData))
 				logger.log("🏗️ REGISTRY: ✅ Response published for:", callId)
 			}, `publish-response-${responseChannel}`)
 		}, `publish-response-${responseChannel}`)
@@ -727,7 +727,7 @@ export class FunctionRegistry {
 
 		return await this.circuitBreaker.execute(async () => {
 			return await this.connectionManager.executeOperation(async (client) => {
-				const registryKey = `registry:functions`
+				const registryKey = `${REDIS_KEY_PREFIX}registry:functions`
 				const functionKeys = await client.sMembers(registryKey)
 
 				const functions = []
@@ -736,7 +736,7 @@ export class FunctionRegistry {
 
 				for (const functionKey of functionKeys) {
 					const [name, scope] = functionKey.split(":")
-					const fullKey = `function:${name}:${scope}`
+					const fullKey = `${REDIS_KEY_PREFIX}function:${name}:${scope}`
 					const functionData = await client.hGetAll(fullKey)
 
 					functions.push({
@@ -747,11 +747,11 @@ export class FunctionRegistry {
 					})
 
 					// Get workers for this function
-					const workersKey = `workers:${name}`
+					const workersKey = `${REDIS_KEY_PREFIX}workers:${name}`
 					const functionWorkers = await client.sMembers(workersKey)
 
 					for (const workerId of functionWorkers) {
-						const workerKey = `worker:${workerId}:${name}`
+						const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${name}`
 						const lastSeen = await client.get(workerKey)
 						const age = lastSeen ? Date.now() - parseInt(lastSeen) : null
 						const isHealthy = age !== null && age < this.WORKER_TIMEOUT
