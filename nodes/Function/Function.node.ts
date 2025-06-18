@@ -173,16 +173,39 @@ export class Function implements INodeType {
 			}
 		}
 
-		// Clean up any zombie workers from previous runs before starting
+		// CRITICAL: Clean up ALL existing workers for this function before starting
+		// This prevents multiple Function node instances from running simultaneously
 		try {
 			const registry = await getEnhancedFunctionRegistry()
-			const cleanedCount = await registry.cleanupStaleWorkers(functionName)
+
+			// Get ALL workers for this function (healthy and stale)
+			const allWorkers = await registry.getAvailableWorkers(functionName)
+			logger.log(`🚀 FUNCTION: Found ${allWorkers.length} existing workers for ${functionName}: [${allWorkers.join(", ")}]`)
+
+			// Remove ALL existing workers to prevent race conditions
+			let cleanedCount = 0
+			for (const workerId of allWorkers) {
+				try {
+					await registry.unregisterWorker(workerId, functionName)
+					cleanedCount++
+					logger.log(`🚀 FUNCTION: ✅ Removed existing worker: ${workerId}`)
+				} catch (error) {
+					logger.warn(`🚀 FUNCTION: ⚠️ Failed to remove worker ${workerId}:`, error)
+				}
+			}
+
 			if (cleanedCount > 0) {
-				logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} zombie workers on startup`)
+				logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} existing workers to prevent race conditions`)
+			}
+
+			// Also clean up any stale workers that might not be in the workers set
+			const staleCleanedCount = await registry.cleanupStaleWorkers(functionName)
+			if (staleCleanedCount > 0) {
+				logger.log(`🚀 FUNCTION: ✅ Cleaned up ${staleCleanedCount} additional stale workers`)
 			}
 		} catch (error) {
-			logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up zombie workers on startup:", error)
-			// Don't fail startup if cleanup fails
+			logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up existing workers on startup:", error)
+			// Don't fail startup if cleanup fails, but log it prominently
 		}
 
 		let lifecycleManager: ConsumerLifecycleManager | null = null
@@ -277,24 +300,31 @@ export class Function implements INodeType {
 							logger.log("🚀 FUNCTION: ✅ Health updates stopped")
 						}
 
-						// Enhanced zombie worker cleanup - clean up ALL stale workers for this function
-						// This prevents accumulation of zombie workers from previous runs
+						// CRITICAL: Enhanced cleanup to prevent multiple simultaneous workers
 						if (registry) {
+							// First, unregister current worker immediately
+							if (workerId) {
+								try {
+									await registry.unregisterWorker(workerId, functionName)
+									logger.log("🚀 FUNCTION: ✅ Current worker unregistered immediately")
+								} catch (error) {
+									logger.warn("🚀 FUNCTION: ⚠️ Failed to unregister current worker:", error)
+								}
+							}
+
+							// Then clean up any other stale workers to prevent accumulation
 							try {
 								const cleanedCount = await registry.cleanupStaleWorkers(functionName)
 								if (cleanedCount > 0) {
-									logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} zombie workers during shutdown`)
+									logger.log(`🚀 FUNCTION: ✅ Cleaned up ${cleanedCount} additional stale workers during shutdown`)
 								}
 							} catch (cleanupError) {
-								logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up zombie workers:", cleanupError)
+								logger.warn("🚀 FUNCTION: ⚠️ Failed to clean up stale workers:", cleanupError)
 							}
 
-							// Clean up current worker registration to prevent zombie workers
-							// This is critical - without this, dead workers stay in registry and cause timeouts
-							if (workerId) {
-								await registry.unregisterWorker(workerId, functionName)
-								logger.log("🚀 FUNCTION: ✅ Current worker unregistered to prevent zombie workers")
-							}
+							// CRITICAL: Add a small delay to ensure cleanup completes before n8n restarts us
+							await new Promise((resolve) => setTimeout(resolve, 100))
+							logger.log("🚀 FUNCTION: ✅ Cleanup delay completed - ready for clean restart")
 						}
 
 						// Stop the lifecycle manager - cleanly shuts down Redis consumer

@@ -373,31 +373,48 @@ export class ConsumerLifecycleManager {
 			// Check if we received a wake-up notification - if so, use non-blocking read
 			const useNonBlocking = this.wakeUpReceived
 			if (useNonBlocking) {
-				if (this.wakeUpReceived) {
-					console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
-					logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
-					this.wakeUpReceived = false // Reset flag
-				}
+				console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
+				logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
+				this.wakeUpReceived = false // Reset flag AFTER logging
 			}
 
 			let result: any = null
 
 			if (useNonBlocking) {
-				// Non-blocking read for instant response
-				result = await this.client.xReadGroup(
-					this.config.groupName,
-					this.consumerId!,
-					[
+				// CRITICAL: For wake-up, try multiple times with small delays to handle race conditions
+				// The message might not be immediately available due to Redis replication lag
+				let attempts = 0
+				const maxAttempts = 5
+
+				while (attempts < maxAttempts && !result) {
+					result = await this.client.xReadGroup(
+						this.config.groupName,
+						this.consumerId!,
+						[
+							{
+								key: this.config.streamKey,
+								id: ">",
+							},
+						],
 						{
-							key: this.config.streamKey,
-							id: ">",
-						},
-					],
-					{
-						COUNT: 1,
-						BLOCK: 0, // Non-blocking
+							COUNT: 1,
+							BLOCK: 0, // Non-blocking
+						}
+					)
+
+					if (!result || result.length === 0) {
+						attempts++
+						if (attempts < maxAttempts) {
+							console.log(`📢📢📢 CONSUMER: No messages found on attempt ${attempts}, retrying in 10ms...`)
+							await this.sleepMs(10) // Small delay to handle race conditions
+						}
 					}
-				)
+				}
+
+				if (!result || result.length === 0) {
+					console.log(`📢📢📢 CONSUMER: No messages found after ${maxAttempts} attempts - may have been processed by another consumer`)
+					logger.log("📢🔄 LIFECYCLE: No messages found after wake-up retries - continuing normal processing")
+				}
 			} else {
 				// Use Promise.race() for instant interruption of blocking calls
 				logger.log("🔄 LIFECYCLE: Using Promise.race() for interruptible blocking read")
@@ -456,12 +473,9 @@ export class ConsumerLifecycleManager {
 			this.reportTrafficIfNeeded()
 
 			if (!result || result.length === 0) {
-				// No messages
+				// No messages - this is normal for polling, but concerning after wake-up
 				if (useNonBlocking) {
-					if (this.wakeUpReceived) {
-						console.log(`📢📢📢 CONSUMER: No messages found after wake-up notification`)
-						logger.log("📢🔄 LIFECYCLE: No messages found after wake-up - may have been processed by another consumer")
-					}
+					// This was already logged in the retry loop above
 				}
 				// Continue loop (no log spam for normal polling)
 				return
