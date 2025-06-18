@@ -30,6 +30,13 @@ export class Function implements INodeType {
 		},
 		properties: [
 			{
+				displayName:
+					"To name your function, rename this Function node in your workflow. For the Call Function node to see this function, you must make the workflow Active. Whenever you make changes to this function definition, deactivate and reactivate the workflow. IMPORTANT: You must add a 'Return from Function' node or the function will run forever!",
+				name: "functionSetupNotice",
+				type: "notice",
+				default: "",
+			},
+			{
 				displayName: "Function Description",
 				name: "functionDescription",
 				type: "string",
@@ -54,6 +61,22 @@ export class Function implements INodeType {
 						displayName: "Parameter",
 						values: [
 							{
+								displayName: "Default Value",
+								name: "defaultValue",
+								type: "string",
+								default: "",
+								placeholder: "Default value (optional)",
+								description: "Default value for this parameter",
+							},
+							{
+								displayName: "Description",
+								name: "description",
+								type: "string",
+								default: "",
+								placeholder: "Parameter description",
+								description: "Description of what this parameter does",
+							},
+							{
 								displayName: "Parameter Name",
 								name: "name",
 								type: "string",
@@ -63,12 +86,11 @@ export class Function implements INodeType {
 								required: true,
 							},
 							{
-								displayName: "Description",
-								name: "description",
-								type: "string",
-								default: "",
-								placeholder: "Parameter description",
-								description: "Description of what this parameter does",
+								displayName: "Required",
+								name: "required",
+								type: "boolean",
+								default: false,
+								description: "Whether this parameter is required",
 							},
 							{
 								displayName: "Type",
@@ -98,21 +120,6 @@ export class Function implements INodeType {
 								],
 								default: "string",
 								description: "Type of the parameter",
-							},
-							{
-								displayName: "Required",
-								name: "required",
-								type: "boolean",
-								default: false,
-								description: "Whether this parameter is required",
-							},
-							{
-								displayName: "Default Value",
-								name: "defaultValue",
-								type: "string",
-								default: "",
-								placeholder: "Default value (optional)",
-								description: "Default value for this parameter",
 							},
 						],
 					},
