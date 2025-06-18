@@ -177,6 +177,7 @@ export class Function implements INodeType {
 		let registry: any = null
 		let workerId: string | null = null
 		let healthUpdateInterval: NodeJS.Timeout | null = null
+		let workerStartTime: number = Date.now()
 
 		try {
 			// Get Redis configuration
@@ -254,20 +255,17 @@ export class Function implements INodeType {
 
 			return {
 				closeFunction: async () => {
+					// BELT-AND-SUSPENDERS: Check minimum lifetime and debounce
+					const uptime = Date.now() - workerStartTime
+					if (uptime < 1000) {
+						logger.log(`🔒 PREVENTION: Ignoring shutdown - worker uptime ${uptime}ms < 1000ms minimum`)
+						return
+					}
+
 					logger.log("🔒 PREVENTION: Starting Function node shutdown sequence...")
 					logger.log(`🔒 PREVENTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
-						// STEP 0: Send shutdown notification to alert CallFunction nodes instantly
-						if (registry instanceof EnhancedFunctionRegistry) {
-							logger.log("🔒 PREVENTION: Step 0 - Sending shutdown notification for instant restart coordination")
-							const notificationManager = registry["notificationManager"]
-							if (notificationManager) {
-								await notificationManager.publishShutdown(workflowId, "workflow-save-restart")
-								logger.log("🔒 PREVENTION: ✅ Shutdown notification sent - CallFunction nodes alerted instantly")
-							}
-						}
-
 						// STEP 1: Immediately mark worker as unhealthy to prevent new calls
 						logger.log("🔒 PREVENTION: Step 1 - Immediately marking worker as unhealthy")
 						if (workerId && registry instanceof EnhancedFunctionRegistry) {

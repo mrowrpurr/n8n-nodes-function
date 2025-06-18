@@ -36,6 +36,9 @@ export class ConsumerLifecycleManager {
 	private notificationManager: NotificationManager | null = null
 	private wakeUpReceived: boolean = false
 
+	// Promise resolver for instant wake-up interruption
+	private wakeUpResolver: (() => void) | null = null
+
 	// Traffic monitoring for Phase 3
 	private redisOperationCount: number = 0
 	private lastTrafficReport: number = Date.now()
@@ -78,6 +81,9 @@ export class ConsumerLifecycleManager {
 			// CRITICAL: Create stream and consumer group BEFORE starting consumer
 			await this.ensureStreamAndGroupExist()
 
+			// CRITICAL: Claim any pending messages from dead consumers
+			await this.claimPendingMessages()
+
 			// Register consumer in state management
 			await this.registerConsumer()
 
@@ -89,25 +95,21 @@ export class ConsumerLifecycleManager {
 						console.log(`📢📢📢 CONSUMER: WAKE-UP NOTIFICATION received for ${this.config.functionName}!`)
 						logger.log(`📢🔄 LIFECYCLE: Wake-up notification received for function call ${message.callId}`)
 						this.wakeUpReceived = true
+						// Instantly interrupt blocking call
+						if (this.wakeUpResolver) {
+							this.wakeUpResolver()
+							this.wakeUpResolver = null
+						}
 					}
 				}
 
 				await this.notificationManager.subscribeToWakeUp(wakeUpListener)
 				logger.log("🔄 LIFECYCLE: ✅ Subscribed to wake-up notifications - will respond instantly to function calls")
 
-				// Also subscribe to shutdown notifications for coordinated restarts
-				logger.log("🔄 LIFECYCLE: Subscribing to shutdown notifications for coordinated restarts")
-				const shutdownListener: NotificationListener = (message: any) => {
-					if (message.type === "function-restart" && message.workflowId === this.config.scope) {
-						console.log(`📢📢📢 CONSUMER: SHUTDOWN NOTIFICATION received for workflow ${this.config.scope}!`)
-						logger.log(`📢🔄 LIFECYCLE: Shutdown notification received - reason: ${message.reason}`)
-						// Note: This could be used for coordinated shutdown in the future
-						// For now, just log it for monitoring
-					}
-				}
-
-				await this.notificationManager.subscribeToShutdown(shutdownListener)
-				logger.log("🔄 LIFECYCLE: ✅ Subscribed to shutdown notifications - will detect coordinated restarts")
+				// NOTE: Function nodes do NOT subscribe to shutdown notifications
+				// Shutdown notifications are for CallFunction nodes to detect Function node restarts
+				// Function nodes should only publish shutdown notifications, not listen to them
+				logger.log("🔄 LIFECYCLE: Function nodes do not subscribe to shutdown notifications")
 			} else {
 				logger.log("🔄 LIFECYCLE: No notification manager - using 30-second polling only")
 			}
@@ -146,6 +148,12 @@ export class ConsumerLifecycleManager {
 
 			// Stop processing loop
 			this.isRunning = false
+
+			// Instantly interrupt any blocking calls
+			if (this.wakeUpResolver) {
+				this.wakeUpResolver()
+				this.wakeUpResolver = null
+			}
 
 			// Wait for processing loop to finish
 			if (this.processingLoop) {
@@ -232,6 +240,66 @@ export class ConsumerLifecycleManager {
 	}
 
 	/**
+	 * Claim pending messages from dead/stopped consumers
+	 * This ensures no messages are lost during consumer transitions
+	 */
+	private async claimPendingMessages(): Promise<void> {
+		if (!this.client) {
+			throw new Error("Redis client not initialized")
+		}
+
+		try {
+			logger.log("🔄 LIFECYCLE: Checking for pending messages to claim...")
+
+			// Get pending messages info
+			const pending = await this.client.xPending(this.config.streamKey, this.config.groupName)
+
+			if (pending.pending === 0) {
+				logger.log("🔄 LIFECYCLE: No pending messages found")
+				return
+			}
+
+			logger.log(`🔄 LIFECYCLE: Found ${pending.pending} pending messages`)
+
+			// Get detailed pending messages (up to 100 at a time)
+			const pendingMessages = await this.client.xPendingRange(this.config.streamKey, this.config.groupName, "-", "+", 100)
+
+			let claimedCount = 0
+
+			for (const msg of pendingMessages) {
+				// Only claim messages older than 5 seconds (to avoid race conditions)
+				if (msg.millisecondsSinceLastDelivery > 5000) {
+					try {
+						// Claim the message for this consumer
+						const claimed = await this.client.xClaim(
+							this.config.streamKey,
+							this.config.groupName,
+							this.consumerId!,
+							5000, // min idle time
+							[msg.id]
+						)
+
+						if (claimed && claimed.length > 0 && claimed[0] && claimed[0].message) {
+							claimedCount++
+							logger.log(`🔄 LIFECYCLE: Claimed pending message ${msg.id} from consumer ${msg.consumer}`)
+
+							// Process the claimed message immediately
+							await this.processMessage(msg.id, claimed[0].message)
+						}
+					} catch (error) {
+						logger.error(`🔄 LIFECYCLE: Failed to claim message ${msg.id}:`, error)
+					}
+				}
+			}
+
+			logger.log(`🔄 LIFECYCLE: ✅ Claimed and processed ${claimedCount} pending messages`)
+		} catch (error) {
+			logger.error("🔄 LIFECYCLE: ❌ Error claiming pending messages:", error)
+			// Don't throw - allow consumer to start even if claiming fails
+		}
+	}
+
+	/**
 	 * Register consumer in state management
 	 */
 	private async registerConsumer(): Promise<void> {
@@ -294,7 +362,7 @@ export class ConsumerLifecycleManager {
 	}
 
 	/**
-	 * Process messages from Redis stream with instant wake-up support
+	 * Process messages from Redis stream with instant wake-up support using Promise.race()
 	 */
 	private async processStreamMessages(): Promise<void> {
 		if (!this.client || !this.isRunning) {
@@ -305,26 +373,83 @@ export class ConsumerLifecycleManager {
 			// Check if we received a wake-up notification - if so, use non-blocking read
 			const useNonBlocking = this.wakeUpReceived
 			if (useNonBlocking) {
-				console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
-				logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
-				this.wakeUpReceived = false // Reset flag
+				if (this.wakeUpReceived) {
+					console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
+					logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
+					this.wakeUpReceived = false // Reset flag
+				}
 			}
 
-			// Read messages from stream - instant if wake-up received, otherwise 30-second wait
-			const result = await this.client.xReadGroup(
-				this.config.groupName,
-				this.consumerId!,
-				[
+			let result: any = null
+
+			if (useNonBlocking) {
+				// Non-blocking read for instant response
+				result = await this.client.xReadGroup(
+					this.config.groupName,
+					this.consumerId!,
+					[
+						{
+							key: this.config.streamKey,
+							id: ">",
+						},
+					],
 					{
-						key: this.config.streamKey,
-						id: ">",
-					},
-				],
-				{
-					COUNT: 1,
-					BLOCK: useNonBlocking ? 0 : this.BLOCK_TIME, // 0 = non-blocking, 30000 = 30 seconds
+						COUNT: 1,
+						BLOCK: 0, // Non-blocking
+					}
+				)
+			} else {
+				// Use Promise.race() for instant interruption of blocking calls
+				logger.log("🔄 LIFECYCLE: Using Promise.race() for interruptible blocking read")
+
+				const streamPromise = this.client.xReadGroup(
+					this.config.groupName,
+					this.consumerId!,
+					[
+						{
+							key: this.config.streamKey,
+							id: ">",
+						},
+					],
+					{
+						COUNT: 1,
+						BLOCK: this.BLOCK_TIME, // 30 seconds
+					}
+				)
+
+				const wakeUpPromise = new Promise<"wake-up">((resolve) => {
+					this.wakeUpResolver = () => resolve("wake-up")
+				})
+
+				// Race between stream read and wake-up (shutdown removed)
+				const raceResult = await Promise.race([streamPromise, wakeUpPromise])
+
+				// Clean up resolvers
+				this.wakeUpResolver = null
+
+				if (raceResult === "wake-up") {
+					console.log(`📢📢📢 CONSUMER: Promise.race() interrupted by WAKE-UP notification!`)
+					logger.log("📢🔄 LIFECYCLE: Blocking call interrupted by wake-up - will check for messages")
+					// Continue to check for messages with non-blocking read
+					result = await this.client.xReadGroup(
+						this.config.groupName,
+						this.consumerId!,
+						[
+							{
+								key: this.config.streamKey,
+								id: ">",
+							},
+						],
+						{
+							COUNT: 1,
+							BLOCK: 0, // Non-blocking
+						}
+					)
+				} else {
+					// Normal stream result
+					result = raceResult
 				}
-			)
+			}
 
 			// Track Redis operation for monitoring
 			this.redisOperationCount++
@@ -333,8 +458,10 @@ export class ConsumerLifecycleManager {
 			if (!result || result.length === 0) {
 				// No messages
 				if (useNonBlocking) {
-					console.log(`📢📢📢 CONSUMER: No messages found after wake-up notification`)
-					logger.log("📢🔄 LIFECYCLE: No messages found after wake-up - may have been processed by another consumer")
+					if (this.wakeUpReceived) {
+						console.log(`📢📢📢 CONSUMER: No messages found after wake-up notification`)
+						logger.log("📢🔄 LIFECYCLE: No messages found after wake-up - may have been processed by another consumer")
+					}
 				}
 				// Continue loop (no log spam for normal polling)
 				return
@@ -348,7 +475,8 @@ export class ConsumerLifecycleManager {
 				console.log(`🚀🚀🚀 CONSUMER: Processing stream with ${stream.messages.length} messages`)
 				for (const message of stream.messages) {
 					if (!this.isRunning) {
-						logger.log("🔄 LIFECYCLE: Consumer stopping, skipping message processing")
+						logger.log("🔄 LIFECYCLE: Consumer stopping, leaving message for next consumer")
+						// Don't acknowledge the message - let the next consumer claim it
 						return
 					}
 
@@ -455,8 +583,8 @@ export class ConsumerLifecycleManager {
 	 * Report Redis traffic statistics for monitoring
 	 */
 	private reportTrafficIfNeeded(): void {
-		const now = Date.now()
-		const timeSinceLastReport = now - this.lastTrafficReport
+		const currentTime = Date.now()
+		const timeSinceLastReport = currentTime - this.lastTrafficReport
 
 		if (timeSinceLastReport >= this.TRAFFIC_REPORT_INTERVAL) {
 			const operationsPerSecond = this.redisOperationCount / (timeSinceLastReport / 1000)
@@ -466,7 +594,7 @@ export class ConsumerLifecycleManager {
 
 			// Reset counters
 			this.redisOperationCount = 0
-			this.lastTrafficReport = now
+			this.lastTrafficReport = currentTime
 		}
 	}
 

@@ -138,11 +138,14 @@ export class NotificationManager {
 	 * Publish shutdown notification for Function node restarts
 	 * This notifies CallFunction nodes that workers are restarting
 	 */
-	async publishShutdown(workflowId: string, restartReason: string): Promise<void> {
+	async publishShutdown(workflowId: string, functionName: string, originWorkerId: string, shutdownSeq: number, restartReason: string): Promise<void> {
 		const channel = `${REDIS_KEY_PREFIX}shutdown`
 		const message = {
 			type: "function-restart",
 			workflowId,
+			functionName,
+			originWorkerId,
+			shutdownSeq,
 			reason: restartReason,
 			timestamp: Date.now(),
 		}

@@ -2,6 +2,7 @@ import { FunctionLifecycleNotifier } from "./FunctionLifecycleNotifier"
 import { FunctionReadinessWatcher, WorkerInfo } from "./FunctionReadinessWatcher"
 import { FunctionRegistry } from "./FunctionRegistry"
 import { NotificationManager } from "./NotificationManager"
+import { RedisConnectionManager } from "./RedisConnectionManager"
 import { functionRegistryLogger as logger } from "./Logger"
 
 /**
@@ -13,10 +14,12 @@ export class WorkerCoordinator {
 	private registry: FunctionRegistry
 	private functionNotifiers: Map<string, FunctionLifecycleNotifier> = new Map()
 	private readinessWatcher: FunctionReadinessWatcher
+	private connectionManager: RedisConnectionManager
 
-	constructor(notificationManager: NotificationManager, registry: FunctionRegistry) {
+	constructor(notificationManager: NotificationManager, registry: FunctionRegistry, connectionManager: RedisConnectionManager) {
 		this.notificationManager = notificationManager
 		this.registry = registry
+		this.connectionManager = connectionManager
 		this.readinessWatcher = new FunctionReadinessWatcher(notificationManager)
 	}
 
@@ -138,15 +141,27 @@ export class WorkerCoordinator {
 	}
 
 	/**
-	 * Coordinate graceful shutdown with notifications
+	 * Get next shutdown sequence number for a workflow/function
+	 */
+	async getNextShutdownSequence(workflowId: string, functionName: string): Promise<number> {
+		const client = await this.connectionManager.getClient()
+		const seqKey = `${workflowId}:${functionName}`
+		const seq = await client.hIncrBy("n8n:shutdown:sequences", seqKey, 1)
+		logger.log(`🎯 COORDINATOR: Generated shutdown sequence ${seq} for ${functionName}`)
+		return seq
+	}
+
+	/**
+	 * Coordinate graceful shutdown with notifications and sequence deduplication
 	 */
 	async coordinateGracefulShutdown(functionName: string, workflowId: string, workerId: string, estimatedDowntime: number = 3000): Promise<void> {
 		logger.log(`🎯 COORDINATOR: Coordinating graceful shutdown for ${functionName}`)
 
-		const notifier = this.getNotifier(functionName, workflowId, workerId)
+		// Generate shutdown sequence number
+		const shutdownSeq = await this.getNextShutdownSequence(workflowId, functionName)
 
-		// Step 1: Notify shutdown is starting
-		await notifier.notifyShuttingDown(estimatedDowntime)
+		// Step 1: Notify shutdown is starting with sequence
+		await this.notificationManager.publishShutdown(workflowId, functionName, workerId, shutdownSeq, "coordinated_shutdown")
 
 		// Step 2: Stop health updates
 		// (This is handled by the Function node)
@@ -159,6 +174,7 @@ export class WorkerCoordinator {
 		await this.registry.unregisterWorker(workerId, functionName)
 
 		// Step 5: Notify offline
+		const notifier = this.getNotifier(functionName, workflowId, workerId)
 		await notifier.notifyOffline("coordinated_shutdown")
 
 		// Clean up notifier

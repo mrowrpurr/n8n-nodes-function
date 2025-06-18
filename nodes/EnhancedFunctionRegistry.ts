@@ -20,7 +20,7 @@ export class EnhancedFunctionRegistry extends FunctionRegistry {
 		// Initialize notification infrastructure
 		const connectionManager = RedisConnectionManager.getInstance(redisConfig)
 		this.notificationManager = new NotificationManager(connectionManager)
-		this.coordinator = new WorkerCoordinator(this.notificationManager, this)
+		this.coordinator = new WorkerCoordinator(this.notificationManager, this, connectionManager)
 
 		logger.log("🚀 ENHANCED REGISTRY: Initialized with pub/sub notifications")
 	}

@@ -686,6 +686,15 @@ export class CallFunction implements INodeType {
 						)
 					}
 
+					// CRITICAL: Clean up stale workers BEFORE health check to prevent accumulation
+					logger.log(`🧹 PREVENTION: Cleaning up stale workers for function ${functionName} before health check`)
+					const cleanedStaleCount = await registry.cleanupStaleWorkers(functionName, 30000) // 30 second timeout
+					if (cleanedStaleCount > 0) {
+						logger.log(`🧹 PREVENTION: Cleaned up ${cleanedStaleCount} stale workers before health check`)
+						// Refresh worker list after cleanup
+						availableWorkers = await registry.getAvailableWorkers(functionName)
+					}
+
 					// Enhanced worker health check with diagnostic logging
 					const healthyWorkers = []
 					const staleWorkers = []
@@ -703,7 +712,7 @@ export class CallFunction implements INodeType {
 
 					// Log diagnostic information
 					if (staleWorkers.length > 0) {
-						logger.log(`🧹 PREVENTION: Found ${staleWorkers.length} stale workers that would be GC'd: [${staleWorkers.join(", ")}]`)
+						logger.log(`🧹 PREVENTION: Found ${staleWorkers.length} remaining stale workers: [${staleWorkers.join(", ")}]`)
 					}
 					logger.log(`✅ PREVENTION: Found ${healthyWorkers.length} healthy workers: [${healthyWorkers.join(", ")}]`)
 
