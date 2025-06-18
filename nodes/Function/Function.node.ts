@@ -30,6 +30,14 @@ export class Function implements INodeType {
 		},
 		properties: [
 			{
+				displayName: "Function Description",
+				name: "functionDescription",
+				type: "string",
+				default: "",
+				placeholder: "Describe what this function does...",
+				description: "Optional description that will be shown in the CallFunction dropdown",
+			},
+			{
 				displayName: "Parameters",
 				name: "parameters",
 				placeholder: "Add parameter",
@@ -121,6 +129,9 @@ export class Function implements INodeType {
 			throw new NodeOperationError(this.getNode(), "Function name is required (set the node name)")
 		}
 
+		// Extract function description
+		const functionDescription = this.getNodeParameter("functionDescription") as string
+
 		// Extract parameter definitions
 		const parametersConfig = this.getNodeParameter("parameters") as any
 		const parameters = []
@@ -190,6 +201,7 @@ export class Function implements INodeType {
 				parameters: parameters, // Use extracted parameters
 				workflowId: workflowId,
 				nodeId: this.getNode().id,
+				description: functionDescription || "", // Add the function description
 			})
 			logger.log("🚀 FUNCTION: ✅ Function registered in registry with instant notifications")
 

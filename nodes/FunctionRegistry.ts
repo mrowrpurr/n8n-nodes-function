@@ -10,6 +10,7 @@ export interface FunctionDefinition {
 	parameters: FunctionParameter[]
 	workflowId: string
 	nodeId: string
+	description?: string
 }
 
 export interface FunctionParameter {
@@ -95,6 +96,7 @@ export class FunctionRegistry {
 					parameters: JSON.stringify(definition.parameters),
 					workflowId: definition.workflowId,
 					nodeId: definition.nodeId,
+					description: definition.description || "",
 					registeredAt: Date.now().toString(),
 				})
 
@@ -236,10 +238,12 @@ export class FunctionRegistry {
 					const functionData = await client.hGetAll(fullKey)
 
 					if (functionData && functionData.workflowId === workflowId) {
+						const description = functionData.description && functionData.description.trim() ? functionData.description : `Function: ${name}`
+
 						functions.push({
-							name: `${name} (${scope})`,
+							name: name,
 							value: name,
-							description: `Function: ${name}, Scope: ${scope}`,
+							description: description,
 						})
 					}
 				}
