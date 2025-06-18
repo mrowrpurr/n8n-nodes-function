@@ -206,7 +206,7 @@ export class Function implements INodeType {
 			logger.log("🚀 FUNCTION: ✅ Function registered in registry with instant notifications")
 
 			// Create and start lifecycle manager with notification support for instant wake-up
-			const notificationManager = registry instanceof EnhancedFunctionRegistry ? registry["notificationManager"] : null
+			const notificationManager = registry instanceof EnhancedFunctionRegistry ? registry["notificationManager"] : undefined
 
 			lifecycleManager = new ConsumerLifecycleManager(consumerConfig, redisConfig, messageHandler, notificationManager)
 
