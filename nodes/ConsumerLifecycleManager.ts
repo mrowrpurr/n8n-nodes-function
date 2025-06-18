@@ -261,10 +261,7 @@ export class ConsumerLifecycleManager {
 		}
 
 		try {
-			const readStartTime = Date.now()
-			console.log(`🚀🚀🚀 CONSUMER: About to read from stream with BLOCK_TIME=${this.BLOCK_TIME}ms`)
-
-			// Read messages from stream
+			// Read messages from stream (no noisy polling logs)
 			const result = await this.client.xReadGroup(
 				this.config.groupName,
 				this.consumerId!,
@@ -280,15 +277,12 @@ export class ConsumerLifecycleManager {
 				}
 			)
 
-			const readDuration = Date.now() - readStartTime
-			console.log(`🚀🚀🚀 CONSUMER: Stream read completed in ${readDuration}ms`)
-
 			if (!result || result.length === 0) {
-				// No messages, continue loop
-				console.log(`🚀🚀🚀 CONSUMER: No messages received, continuing loop`)
+				// No messages, continue loop (no log spam)
 				return
 			}
 
+			// Only log when we actually receive messages
 			console.log(`🚀🚀🚀 CONSUMER: Received ${result.length} streams with messages`)
 
 			// Process each message
