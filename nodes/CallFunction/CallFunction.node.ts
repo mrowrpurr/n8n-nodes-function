@@ -28,6 +28,12 @@ export class CallFunction implements INodeType {
 		outputs: [NodeConnectionType.Main],
 		properties: [
 			{
+				displayName: "ℹ️ If function details are out-of-date, toggle Active off/on for the workflow containing the function",
+				name: "functionRefreshNotice",
+				type: "notice",
+				default: "",
+			},
+			{
 				displayName: "Workflow",
 				name: "workflowId",
 				type: "workflowSelector",

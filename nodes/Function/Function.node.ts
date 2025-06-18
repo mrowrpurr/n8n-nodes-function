@@ -30,9 +30,8 @@ export class Function implements INodeType {
 		},
 		properties: [
 			{
-				displayName:
-					"To name your function, rename this Function node in your workflow. For the Call Function node to see this function, you must make the workflow Active. Whenever you make changes to this function definition, deactivate and reactivate the workflow. IMPORTANT: You must add a 'Return from Function' node or the function will run forever!",
-				name: "functionSetupNotice",
+				displayName: "🏷️ To name your function, rename this Function node in your workflow.",
+				name: "functionNamingNotice",
 				type: "notice",
 				default: "",
 			},
@@ -124,6 +123,12 @@ export class Function implements INodeType {
 						],
 					},
 				],
+			},
+			{
+				displayName: "⚠️ IMPORTANT: Add a 'Return from Function' node or your function will run forever!",
+				name: "functionReturnNotice",
+				type: "notice",
+				default: "",
 			},
 		],
 	}
