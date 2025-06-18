@@ -296,7 +296,7 @@ export class Function implements INodeType {
 					logger.log("🚀 FUNCTION: ========================================")
 					logger.log("🚀 FUNCTION: closeFunction() called by n8n")
 					logger.log("🚀 FUNCTION: This happens during workflow changes or deactivation")
-					logger.log("🚀 FUNCTION: Starting lightweight shutdown (like Redis trigger)...")
+					logger.log("🚀 FUNCTION: Starting ultra-lightweight shutdown (keep consumer active)...")
 					logger.log(`🚀 FUNCTION: Shutting down function: ${functionName}, worker: ${workerId}`)
 
 					try {
@@ -307,19 +307,20 @@ export class Function implements INodeType {
 							logger.log("🚀 FUNCTION: ✅ Health updates stopped")
 						}
 
-						// Stop the lifecycle manager - cleanly shuts down Redis consumer
-						if (lifecycleManager) {
-							await lifecycleManager.stop()
-							logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager stopped")
-						}
+						// DON'T stop the lifecycle manager - keep consumer active to process messages
+						// This is the key difference from Redis trigger - we need the consumer to stay alive
+						// because CallFunction might send messages immediately after closeFunction
+						logger.log("🚀 FUNCTION: ✅ Consumer lifecycle manager kept ACTIVE (not stopped)")
+						logger.log("🚀 FUNCTION: ✅ Consumer can still process function calls after closeFunction")
 
-						// LIGHTWEIGHT SHUTDOWN: Don't unregister workers or clean registry
-						// This keeps the worker registered as healthy so CallFunction can find it
-						// when n8n restarts this Function node after workflow changes
-						logger.log("🚀 FUNCTION: ✅ Lightweight shutdown complete - worker stays registered for restart")
-						logger.log("🚀 FUNCTION: Worker remains available in registry for CallFunction to find")
+						// ULTRA-LIGHTWEIGHT SHUTDOWN:
+						// - Don't unregister workers or clean registry
+						// - Don't stop lifecycle manager (keep consumer active)
+						// - Only stop health updates
+						logger.log("🚀 FUNCTION: ✅ Ultra-lightweight shutdown complete - consumer stays active")
+						logger.log("🚀 FUNCTION: Worker remains available and consumer ready for immediate calls")
 					} catch (error) {
-						logger.error("🚀 FUNCTION: ❌ Error during lightweight shutdown:", error)
+						logger.error("🚀 FUNCTION: ❌ Error during ultra-lightweight shutdown:", error)
 						// Even if cleanup fails, don't prevent n8n from continuing
 					}
 				},

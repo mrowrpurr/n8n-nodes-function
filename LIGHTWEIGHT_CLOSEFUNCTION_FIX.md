@@ -24,38 +24,46 @@ await registry.unregisterWorker(workerId, functionName)
 // Clean up stale workers
 const cleanedCount = await registry.cleanupStaleWorkers(functionName)
 
+// Stop lifecycle manager (puts consumer in "stopping" state)
+await lifecycleManager.stop()
+
 // Complex shutdown coordination with delays
 await new Promise((resolve) => setTimeout(resolve, 100))
 ```
 
 ### After (Fixed):
 ```typescript
-// Stop health updates
+// Stop health updates only
 if (healthUpdateInterval) {
     clearInterval(healthUpdateInterval)
     healthUpdateInterval = null
 }
 
-// Stop lifecycle manager
-if (lifecycleManager) {
-    await lifecycleManager.stop()
-}
-
+// DON'T stop lifecycle manager - keep consumer ACTIVE
 // DON'T unregister workers or clean registry
-// Worker stays registered as healthy for restart
+// Consumer stays ready to process function calls immediately
 ```
 
 ## Key Changes
 1. **Removed worker unregistration** - keeps worker available in registry
 2. **Removed stale worker cleanup** - prevents removing healthy workers
-3. **Removed complex shutdown delays** - simple, fast shutdown
-4. **Added detailed logging** - track when trigger()/closeFunction() are called
+3. **CRITICAL: Don't stop lifecycle manager** - keeps consumer ACTIVE to process calls
+4. **Removed complex shutdown delays** - simple, fast shutdown
+5. **Added detailed logging** - track when trigger()/closeFunction() are called
+
+## Root Cause Found
+From `explain-this-please.log` analysis:
+- CallFunction found healthy worker ✅
+- Wake-up notification sent and received ✅
+- **BUT consumer was in "stopping" state and couldn't process the call ❌**
+
+The issue wasn't worker availability - it was that `closeFunction` was stopping the consumer, making it unable to process new function calls.
 
 ## Expected Behavior
 1. User creates workflow with Function node → Works
-2. User adds CallFunction node → n8n calls `closeFunction` 
-3. **Function node shuts down cleanly but worker stays registered**
-4. CallFunction finds healthy worker immediately → Works
+2. User adds CallFunction node → n8n calls `closeFunction`
+3. **Function node keeps consumer ACTIVE, worker stays registered**
+4. CallFunction sends wake-up → Consumer processes call immediately → Works
 5. No more timeouts or hanging calls
 
 ## Logging Added
