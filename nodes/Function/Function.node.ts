@@ -268,33 +268,40 @@ export class Function implements INodeType {
 							}
 						}
 
-						// STEP 1: Stop accepting new messages immediately
-						logger.log("🔒 PREVENTION: Step 1 - Stopping health updates to signal unavailability")
+						// STEP 1: Immediately mark worker as unhealthy to prevent new calls
+						logger.log("🔒 PREVENTION: Step 1 - Immediately marking worker as unhealthy")
+						if (workerId && registry instanceof EnhancedFunctionRegistry) {
+							await registry.notifyWorkerHealth(functionName, workflowId, workerId, false, "shutdown-starting")
+							logger.log("🔒 PREVENTION: ✅ Worker marked as unhealthy - CallFunction nodes will avoid this worker")
+						}
+
+						// STEP 2: Stop health updates to prevent re-marking as healthy
+						logger.log("🔒 PREVENTION: Step 2 - Stopping health updates to signal unavailability")
 						if (healthUpdateInterval) {
 							clearInterval(healthUpdateInterval)
 							healthUpdateInterval = null
 							logger.log("🔒 PREVENTION: ✅ Worker health updates stopped")
 						}
 
-						// STEP 2: Stop the lifecycle manager to stop consuming messages
-						logger.log("🔒 PREVENTION: Step 2 - Stopping consumer lifecycle manager")
+						// STEP 3: Stop the lifecycle manager to stop consuming messages
+						logger.log("🔒 PREVENTION: Step 3 - Stopping consumer lifecycle manager")
 						if (lifecycleManager) {
 							await lifecycleManager.stop()
 							logger.log("🔒 PREVENTION: ✅ Consumer lifecycle manager stopped")
 						}
 
-						// STEP 3: Wait a moment for any in-flight messages to complete
-						logger.log("🔒 PREVENTION: Step 3 - Waiting 2 seconds for in-flight messages to complete")
+						// STEP 4: Wait a moment for any in-flight messages to complete
+						logger.log("🔒 PREVENTION: Step 4 - Waiting 2 seconds for in-flight messages to complete")
 						await new Promise((resolve) => setTimeout(resolve, 2000))
 
-						// STEP 4: Use enhanced coordinator for graceful shutdown
+						// STEP 5: Use enhanced coordinator for graceful shutdown
 						if (workerId && registry instanceof EnhancedFunctionRegistry) {
-							logger.log("🔒 PREVENTION: Step 4 - Using enhanced coordinator for graceful shutdown")
+							logger.log("🔒 PREVENTION: Step 5 - Using enhanced coordinator for graceful shutdown")
 							await registry.coordinateShutdown(functionName, workflowId, workerId)
 							logger.log("🔒 PREVENTION: ✅ Coordinated shutdown complete")
 						} else if (workerId && registry) {
 							// Fallback to original shutdown sequence
-							logger.log("🔒 PREVENTION: Step 4 - Using standard shutdown (fallback)")
+							logger.log("🔒 PREVENTION: Step 5 - Using standard shutdown (fallback)")
 
 							const diagnostics = await registry.listAllWorkersAndFunctions()
 							const myWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
