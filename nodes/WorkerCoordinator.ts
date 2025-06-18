@@ -177,6 +177,9 @@ export class WorkerCoordinator {
 		if (isHealthy) {
 			await notifier.notifyHealthy()
 		} else {
+			// CRITICAL: Immediately mark worker as unhealthy in Redis so health checks fail
+			await this.registry.markWorkerUnhealthy(workerId, functionName, reason)
+			// Also send pub/sub notification
 			await notifier.notifyUnhealthy(reason || "unknown")
 		}
 	}

@@ -438,6 +438,25 @@ export class FunctionRegistry {
 	}
 
 	/**
+	 * Mark worker as unhealthy immediately
+	 */
+	async markWorkerUnhealthy(workerId: string, functionName: string, reason?: string): Promise<void> {
+		if (!isQueueModeEnabled()) {
+			return
+		}
+
+		await this.circuitBreaker.execute(async () => {
+			await this.connectionManager.executeOperation(async (client) => {
+				const workerKey = `${REDIS_KEY_PREFIX}worker:${workerId}:${functionName}`
+				// Set timestamp to very old value to mark as unhealthy
+				const oldTimestamp = Date.now() - this.WORKER_TIMEOUT * 2 // Double the timeout to ensure it's considered stale
+				await client.setEx(workerKey, this.WORKER_TIMEOUT / 1000, oldTimestamp.toString())
+				logger.log(`🏗️ REGISTRY: ✅ Worker marked as unhealthy: ${workerId} (reason: ${reason || "unknown"})`)
+			}, `mark-worker-unhealthy-${workerId}`)
+		}, `mark-worker-unhealthy-${workerId}`)
+	}
+
+	/**
 	 * Check if worker is healthy
 	 */
 	async isWorkerHealthy(workerId: string, functionName: string): Promise<boolean> {
