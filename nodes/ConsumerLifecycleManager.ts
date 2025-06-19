@@ -434,12 +434,53 @@ export class ConsumerLifecycleManager {
 					}
 				)
 
+				// Add logging to track streamPromise state
+				streamPromise
+					.then((result) => {
+						console.log(
+							`🎯🎯🎯 STREAM-PROMISE: Blocking xReadGroup resolved with result:`,
+							result ? `${result.length} streams with ${result[0]?.messages?.length || 0} messages` : "null"
+						)
+						if (result && result.length > 0 && result[0].messages && result[0].messages.length > 0) {
+							console.log(`🎯🎯🎯 STREAM-PROMISE: First message ID:`, result[0].messages[0].id)
+							console.log(`🎯🎯🎯 STREAM-PROMISE: First message data:`, result[0].messages[0].message)
+						}
+					})
+					.catch((error) => {
+						console.log(`❌❌❌ STREAM-PROMISE: Blocking xReadGroup rejected:`, error.message)
+					})
+
 				const wakeUpPromise = new Promise<"wake-up">((resolve) => {
 					this.wakeUpResolver = () => resolve("wake-up")
 				})
 
+				console.log(`🏁🏁🏁 RACE-START: Starting Promise.race() between streamPromise and wakeUpPromise`)
+
 				// Race between stream read and wake-up (shutdown removed)
 				const raceResult = await Promise.race([streamPromise, wakeUpPromise])
+
+				console.log(`🏁🏁🏁 RACE-RESULT: Promise.race() resolved to:`, raceResult)
+
+				// Check streamPromise state after race completes
+				const streamPromiseState = await Promise.race([streamPromise.then(() => "resolved"), Promise.resolve("pending")])
+				console.log(`🔍🔍🔍 STREAM-STATE: After race, streamPromise is:`, streamPromiseState)
+
+				// If streamPromise resolved, get its result
+				if (streamPromiseState === "resolved") {
+					try {
+						const streamResult = await streamPromise
+						console.log(
+							`🔍🔍🔍 STREAM-STATE: Resolved streamPromise result:`,
+							streamResult ? `${streamResult.length} streams with ${streamResult[0]?.messages?.length || 0} messages` : "null"
+						)
+						if (streamResult && streamResult.length > 0 && streamResult[0].messages && streamResult[0].messages.length > 0) {
+							console.log(`🔍🔍🔍 STREAM-STATE: ⚠️ CRITICAL: streamPromise had the message but race chose wake-up!`)
+							console.log(`🔍🔍🔍 STREAM-STATE: Message ID:`, streamResult[0].messages[0].id)
+						}
+					} catch (error) {
+						console.log(`🔍🔍🔍 STREAM-STATE: Error getting resolved streamPromise result:`, error.message)
+					}
+				}
 
 				// Clean up resolvers
 				this.wakeUpResolver = null
@@ -454,6 +495,12 @@ export class ConsumerLifecycleManager {
 					logger.log("🔍🔄 LIFECYCLE: Checking pending messages after wake-up to fix race condition")
 
 					const pendingMessages = await this.client.xPendingRange(this.config.streamKey, this.config.groupName, "-", "+", 10)
+
+					// Log detailed pending message info for diagnosis
+					console.log(`🔍🔍🔍 PENDING-DETAILS: Found ${pendingMessages.length} total pending messages:`)
+					pendingMessages.forEach((msg, i) => {
+						console.log(`  ${i + 1}. ID: ${msg.id}, Consumer: ${msg.consumer}, Idle: ${msg.millisecondsSinceLastDelivery}ms`)
+					})
 
 					// Filter for messages assigned to this consumer
 					const myPendingMessages = pendingMessages.filter((msg) => msg.consumer === this.consumerId)
@@ -486,6 +533,7 @@ export class ConsumerLifecycleManager {
 						logger.log("🔍🔄 LIFECYCLE: No pending messages after wake-up, checking for new messages")
 
 						// No pending messages, check for new ones with original logic
+						console.log(`🔍🔍🔍 NON-BLOCKING-READ: About to do non-blocking xReadGroup with id: ">"`)
 						result = await this.client.xReadGroup(
 							this.config.groupName,
 							this.consumerId!,
@@ -500,6 +548,7 @@ export class ConsumerLifecycleManager {
 								BLOCK: 0, // Non-blocking
 							}
 						)
+						console.log(`🔍🔍🔍 NON-BLOCKING-READ: Non-blocking read result:`, result ? `${result.length} streams with ${result[0]?.messages?.length || 0} messages` : "null")
 					}
 				} else {
 					// Normal stream result
