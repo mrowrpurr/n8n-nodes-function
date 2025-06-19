@@ -283,7 +283,24 @@ export class Function implements INodeType {
 						// Return the same structure as queue mode - array of INodeExecutionData
 						// The outputItem contains the emitted data, but we need to return the final result
 						const finalOutputItem: INodeExecutionData = {
-							json: returnValue,
+							json: {
+								// Start with original input item data
+								...inputItem.json,
+								// Add function parameters as separate fields
+								...locals,
+								// Add the return value in a structured way
+								_functionReturn: returnValue,
+								// Keep the function call metadata for CallFunction to process
+								_functionCall: {
+									callId,
+									functionName,
+									timestamp: Date.now(),
+									responseChannel: null,
+									messageId: null,
+									streamKey: null,
+									groupName: null,
+								},
+							},
 							index: 0,
 							binary: inputItem.binary,
 						}

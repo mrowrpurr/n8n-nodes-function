@@ -547,37 +547,48 @@ export class CallFunction implements INodeType {
 					for (const resultItem of callResult.result) {
 						// Check if function returned a value via ReturnFromFunction node
 						logger.log("🔧 CallFunction: About to check for return value...")
-
-						// Extract the callId from the _functionCall metadata in the result
-						let returnValueKey = callResult.actualExecutionId
-						if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
-							const functionCallData = resultItem.json._functionCall as any
-							if (functionCallData.callId) {
-								returnValueKey = functionCallData.callId
-								logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
-							} else {
-								logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
-							}
-						} else {
-							logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
-						}
-
-						const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
-						logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+						logger.log("🔧 CallFunction: Result item JSON:", resultItem.json)
 
 						let finalReturnValue = resultItem.json
 
-						// Clear the return value from registry after retrieving it
-						if (returnValue !== null) {
-							logger.log("🔧 CallFunction: Clearing return value from registry...")
-							await registry.clearFunctionReturnValue(returnValueKey!)
-							logger.log("🔧 CallFunction: Return value cleared")
-							finalReturnValue = returnValue
+						// Check if the result contains a _functionReturn field (new in-memory structure)
+						if (resultItem.json._functionReturn !== undefined) {
+							logger.log("🔧 CallFunction: Found _functionReturn in result:", resultItem.json._functionReturn)
+							finalReturnValue = resultItem.json._functionReturn
 						} else {
-							// Clean up any _functionCall metadata from the result
-							const cleanedJson = { ...resultItem.json }
-							delete cleanedJson._functionCall
-							finalReturnValue = cleanedJson
+							// Fallback: try to get return value from registry (old method)
+							logger.log("🔧 CallFunction: No _functionReturn found, trying registry lookup...")
+
+							// Extract the callId from the _functionCall metadata in the result
+							let returnValueKey = callResult.actualExecutionId
+							if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
+								const functionCallData = resultItem.json._functionCall as any
+								if (functionCallData.callId) {
+									returnValueKey = functionCallData.callId
+									logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
+								} else {
+									logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
+								}
+							} else {
+								logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
+							}
+
+							const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
+							logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+
+							// Clear the return value from registry after retrieving it
+							if (returnValue !== null) {
+								logger.log("🔧 CallFunction: Clearing return value from registry...")
+								await registry.clearFunctionReturnValue(returnValueKey!)
+								logger.log("🔧 CallFunction: Return value cleared")
+								finalReturnValue = returnValue
+							} else {
+								// Clean up any _functionCall metadata from the result
+								const cleanedJson = { ...resultItem.json }
+								delete cleanedJson._functionCall
+								delete cleanedJson._functionReturn
+								finalReturnValue = cleanedJson
+							}
 						}
 
 						// Start with the original item
