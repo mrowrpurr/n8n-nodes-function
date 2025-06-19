@@ -280,7 +280,15 @@ export class Function implements INodeType {
 						const returnValue = await registry.waitForReturn(callId)
 						logger.log("🚀 FUNCTION: ✅ Return value received:", returnValue)
 
-						return returnValue
+						// Return the same structure as queue mode - array of INodeExecutionData
+						// The outputItem contains the emitted data, but we need to return the final result
+						const finalOutputItem: INodeExecutionData = {
+							json: returnValue,
+							index: 0,
+							binary: inputItem.binary,
+						}
+
+						return [finalOutputItem]
 					},
 				})
 
