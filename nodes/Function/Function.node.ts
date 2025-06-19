@@ -176,6 +176,8 @@ export class Function implements INodeType {
 				const registry = await getFunctionRegistry()
 
 				const workflowId = this.getWorkflow().id || "unknown"
+
+				// Use the single object parameter interface
 				await registry.registerFunction({
 					name: functionName,
 					scope: workflowId,
