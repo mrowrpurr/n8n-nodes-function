@@ -447,21 +447,60 @@ export class ConsumerLifecycleManager {
 				if (raceResult === "wake-up") {
 					console.log(`📢📢📢 CONSUMER: Promise.race() interrupted by WAKE-UP notification!`)
 					logger.log("📢🔄 LIFECYCLE: Blocking call interrupted by wake-up - will check for messages")
-					// Continue to check for messages with non-blocking read
-					result = await this.client.xReadGroup(
-						this.config.groupName,
-						this.consumerId!,
-						[
-							{
-								key: this.config.streamKey,
-								id: ">",
-							},
-						],
-						{
-							COUNT: 1,
-							BLOCK: 0, // Non-blocking
+
+					// CRITICAL FIX: First check for pending messages that might have been assigned to this consumer
+					// This fixes the race condition where wake-up notification arrives but message is in pending state
+					console.log(`🔍🔍🔍 CONSUMER: Checking for pending messages after wake-up for consumer: ${this.consumerId}`)
+					logger.log("🔍🔄 LIFECYCLE: Checking pending messages after wake-up to fix race condition")
+
+					const pendingMessages = await this.client.xPendingRange(this.config.streamKey, this.config.groupName, "-", "+", 10)
+
+					// Filter for messages assigned to this consumer
+					const myPendingMessages = pendingMessages.filter((msg) => msg.consumer === this.consumerId)
+
+					if (myPendingMessages && myPendingMessages.length > 0) {
+						console.log(`🎯🎯🎯 CONSUMER: FOUND ${myPendingMessages.length} pending messages assigned to this consumer after wake-up! This was the bug!`)
+						logger.log(`🎯🔄 LIFECYCLE: Found ${myPendingMessages.length} pending messages for this consumer after wake-up - claiming them`)
+
+						// Claim the first pending message assigned to this consumer
+						const messageId = myPendingMessages[0].id
+						const claimed = await this.client.xClaim(
+							this.config.streamKey,
+							this.config.groupName,
+							this.consumerId!,
+							0, // min idle time - claim immediately
+							[messageId]
+						)
+
+						if (claimed && claimed.length > 0) {
+							console.log(`✅✅✅ CONSUMER: Successfully claimed pending message ${messageId} after wake-up`)
+							logger.log(`✅🔄 LIFECYCLE: Successfully claimed pending message ${messageId}`)
+							result = [{ name: this.config.streamKey, messages: claimed }]
+						} else {
+							console.log(`❌❌❌ CONSUMER: Failed to claim pending message ${messageId}`)
+							logger.log(`❌🔄 LIFECYCLE: Failed to claim pending message ${messageId}`)
+							result = null
 						}
-					)
+					} else {
+						console.log(`🔍🔍🔍 CONSUMER: No pending messages found after wake-up, checking for new messages`)
+						logger.log("🔍🔄 LIFECYCLE: No pending messages after wake-up, checking for new messages")
+
+						// No pending messages, check for new ones with original logic
+						result = await this.client.xReadGroup(
+							this.config.groupName,
+							this.consumerId!,
+							[
+								{
+									key: this.config.streamKey,
+									id: ">",
+								},
+							],
+							{
+								COUNT: 1,
+								BLOCK: 0, // Non-blocking
+							}
+						)
+					}
 				} else {
 					// Normal stream result
 					result = raceResult
