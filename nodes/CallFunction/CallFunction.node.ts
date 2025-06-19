@@ -594,20 +594,12 @@ export class CallFunction implements INodeType {
 						// Start with the original item
 						let resultJson: any = { ...item.json }
 
-						// Store response if requested
+						// Store response ONLY if requested
 						if (storeResponse && responseVariableName && responseVariableName.trim()) {
 							// Store under specific variable name
 							resultJson[responseVariableName] = finalReturnValue
-						} else {
-							// Default behavior: merge the function result directly into the item
-							if (typeof finalReturnValue === "object" && finalReturnValue !== null && !Array.isArray(finalReturnValue)) {
-								// If result is an object, merge its properties
-								resultJson = { ...resultJson, ...finalReturnValue }
-							} else {
-								// If result is not an object, store under 'result' key
-								resultJson.result = finalReturnValue
-							}
 						}
+						// If storeResponse is false, don't include the function return value at all
 
 						const finalResultItem: INodeExecutionData = {
 							json: resultJson,
@@ -701,22 +693,12 @@ export class CallFunction implements INodeType {
 							// Start with the original item
 							let resultJson: any = { ...item.json }
 
-							// Always include the function result
-							if (response.data !== null) {
-								if (storeResponse && responseVariableName && responseVariableName.trim()) {
-									// Store under specific variable name
-									resultJson[responseVariableName] = response.data
-								} else {
-									// Default behavior: merge the function result directly into the item
-									if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
-										// If result is an object, merge its properties
-										resultJson = { ...resultJson, ...response.data }
-									} else {
-										// If result is not an object, store under 'result' key
-										resultJson.result = response.data
-									}
-								}
+							// Store response ONLY if requested
+							if (response.data !== null && storeResponse && responseVariableName && responseVariableName.trim()) {
+								// Store under specific variable name
+								resultJson[responseVariableName] = response.data
 							}
+							// If storeResponse is false, don't include the function return value at all
 
 							const resultItem: INodeExecutionData = {
 								json: resultJson,
@@ -921,22 +903,12 @@ export class CallFunction implements INodeType {
 					// Start with the original item
 					let resultJson: any = { ...item.json }
 
-					// Always include the function result, but how it's stored depends on storeResponse setting
-					if (response.data !== null) {
-						if (storeResponse && responseVariableName && responseVariableName.trim()) {
-							// Store under specific variable name
-							resultJson[responseVariableName] = response.data
-						} else {
-							// Default behavior: merge the function result directly into the item
-							if (typeof response.data === "object" && response.data !== null && !Array.isArray(response.data)) {
-								// If result is an object, merge its properties
-								resultJson = { ...resultJson, ...response.data }
-							} else {
-								// If result is not an object, store under 'result' key
-								resultJson.result = response.data
-							}
-						}
+					// Store response ONLY if requested
+					if (response.data !== null && storeResponse && responseVariableName && responseVariableName.trim()) {
+						// Store under specific variable name
+						resultJson[responseVariableName] = response.data
 					}
+					// If storeResponse is false, don't include the function return value at all
 
 					const resultItem: INodeExecutionData = {
 						json: resultJson,
