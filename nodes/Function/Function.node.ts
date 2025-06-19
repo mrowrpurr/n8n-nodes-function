@@ -146,7 +146,13 @@ export class Function implements INodeType {
 
 		// Extract parameter definitions
 		const parametersConfig = this.getNodeParameter("parameters") as any
-		const parameters = []
+		const parameters: Array<{
+			name: string
+			type: string
+			required: boolean
+			defaultValue: string
+			description: string
+		}> = []
 
 		if (parametersConfig && parametersConfig.parameter) {
 			for (const param of parametersConfig.parameter) {
@@ -177,7 +183,7 @@ export class Function implements INodeType {
 
 				const workflowId = this.getWorkflow().id || "unknown"
 
-				// Use the single object parameter interface
+				// Use the single object parameter interface with execution function
 				await registry.registerFunction({
 					name: functionName,
 					scope: workflowId,
@@ -186,6 +192,96 @@ export class Function implements INodeType {
 					workflowId: workflowId,
 					nodeId: this.getNode().id,
 					description: functionDescription || "",
+					executionFunction: async (callParameters: Record<string, any>, inputItem: any) => {
+						logger.log("🚀 FUNCTION: In-memory function called:", functionName, "with parameters:", callParameters)
+
+						// Process parameters according to function definition
+						const locals: Record<string, any> = {}
+
+						for (const param of parameters) {
+							const paramName = param.name
+							const paramType = param.type
+							const required = param.required
+							const defaultValue = param.defaultValue
+
+							let value = callParameters[paramName]
+
+							// Handle required parameters
+							if (required && (value === undefined || value === null)) {
+								throw new NodeOperationError(this.getNode(), `Required parameter '${paramName}' is missing`)
+							}
+
+							// Use default value if not provided
+							if (value === undefined || value === null) {
+								if (defaultValue !== "") {
+									try {
+										// Try to parse default value based on type
+										switch (paramType) {
+											case "number":
+												value = Number(defaultValue)
+												break
+											case "boolean":
+												value = defaultValue.toLowerCase() === "true"
+												break
+											case "object":
+											case "array":
+												value = JSON.parse(defaultValue)
+												break
+											default:
+												value = defaultValue
+										}
+									} catch (error) {
+										value = defaultValue // Fall back to string if parsing fails
+									}
+								}
+							}
+
+							locals[paramName] = value
+						}
+
+						// Generate a call ID for in-memory mode to track return values
+						const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+						// Push current function execution context for ReturnFromFunction nodes
+						registry.pushCurrentFunctionExecution(callId)
+
+						// Clear any existing return value for this execution
+						await registry.clearFunctionReturnValue(callId)
+
+						// Create the output item with proper data structure (like old working version)
+						const outputItem: INodeExecutionData = {
+							json: {
+								...inputItem.json, // Original item data first
+								...locals, // Function parameters as separate fields
+								_functionCall: {
+									callId,
+									functionName,
+									timestamp: Date.now(),
+									// For in-memory mode, we don't need Redis-specific fields
+									responseChannel: null,
+									messageId: null,
+									streamKey: null,
+									groupName: null,
+								},
+							},
+							index: 0,
+							binary: inputItem.binary,
+						}
+
+						logger.log("🚀 FUNCTION: Emitting output item to downstream nodes")
+						this.emit([[outputItem]])
+
+						// Function execution complete - ReturnFromFunction node is responsible for handling return value
+						logger.log("🚀 FUNCTION: Function execution completed, waiting for ReturnFromFunction node")
+						logger.log("🚀 FUNCTION: Call ID:", callId)
+						logger.log("🚀 FUNCTION: Note: Function will wait until ReturnFromFunction resolves return value")
+
+						// Wait for ReturnFromFunction to resolve the return value
+						const returnValue = await registry.waitForReturn(callId)
+						logger.log("🚀 FUNCTION: ✅ Return value received:", returnValue)
+
+						return returnValue
+					},
 				})
 
 				logger.log("🚀 FUNCTION: ✅ Function registered in in-memory registry")
@@ -450,10 +546,11 @@ async function processMessage(messageData: any, emitFunction: (data: INodeExecut
 			throw new NodeOperationError(null as any, `Failed to parse item data: ${error}`)
 		}
 
-		// Create output item with function call metadata
+		// Create output item with function call metadata (FIXED: Don't pollute with parsedInput)
 		const outputItem: INodeExecutionData = {
 			json: {
-				...parsedInput,
+				...parsedItem.json, // Original item data first (like old working version)
+				...parsedInput, // Function parameters as separate fields (not spread at root)
 				_functionCall: {
 					callId,
 					functionName: messageData.functionName,

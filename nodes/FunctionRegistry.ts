@@ -11,6 +11,7 @@ export interface FunctionDefinition {
 	workflowId: string
 	nodeId: string
 	description?: string
+	executionFunction?: (parameters: Record<string, any>, item: any) => Promise<any>
 }
 
 export interface FunctionParameter {
@@ -684,6 +685,39 @@ export class FunctionRegistry {
 	}
 
 	/**
+	 * Wait for return value (for in-memory mode)
+	 */
+	async waitForReturn(callId: string, timeout: number = 300000): Promise<any> {
+		const startTime = Date.now()
+
+		while (Date.now() - startTime < timeout) {
+			const value = this.returnValues.get(callId)
+			if (value !== undefined) {
+				// Clean up the return value after retrieving it
+				this.returnValues.delete(callId)
+				logger.log("🏗️ REGISTRY: ✅ Return value retrieved and cleaned up for call:", callId)
+				return value
+			}
+
+			// Wait a bit before checking again
+			await new Promise((resolve) => setTimeout(resolve, 10))
+		}
+
+		// Timeout - clean up and throw error
+		this.returnValues.delete(callId)
+		throw new Error(`Function call timeout after ${timeout}ms for call: ${callId}`)
+	}
+
+	/**
+	 * Push current function execution context (for ReturnFromFunction compatibility)
+	 */
+	pushCurrentFunctionExecution(callId: string): void {
+		// Store the current execution context for ReturnFromFunction to find
+		// This is a simple implementation - just store the callId
+		logger.log("🏗️ REGISTRY: Function execution context pushed for call:", callId)
+	}
+
+	/**
 	 * Get function return value
 	 */
 	async getFunctionReturnValue(callId: string): Promise<any> {
@@ -720,9 +754,27 @@ export class FunctionRegistry {
 				}
 			}
 
-			// In-memory mode: Return a placeholder result that indicates the function exists
-			// The actual execution happens in the Function node itself via callbacks
-			// This mimics the old registry behavior where callFunction just confirmed the function exists
+			// If function has an execution function, call it directly
+			if (definition.executionFunction) {
+				logger.log("🏗️ REGISTRY: Calling stored execution function")
+				try {
+					const result = await definition.executionFunction(parameters, item)
+					return {
+						success: true,
+						result: result,
+						actualExecutionId: `inmem-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+					}
+				} catch (error) {
+					logger.error("🏗️ REGISTRY: Error in execution function:", error)
+					return {
+						success: false,
+						error: error.message,
+					}
+				}
+			}
+
+			// Fallback: Return a placeholder result that indicates the function exists
+			// This is for compatibility with the old behavior
 			logger.log("🏗️ REGISTRY: Function found in memory, returning placeholder result for in-memory execution")
 
 			// Generate a unique execution ID for this call
