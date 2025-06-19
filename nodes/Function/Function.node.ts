@@ -168,11 +168,46 @@ export class Function implements INodeType {
 
 		// Check if queue mode is enabled
 		if (!isQueueModeEnabled()) {
-			logger.log("🚀 FUNCTION: Queue mode disabled, function will not process calls")
-			return {
-				closeFunction: async () => {
-					logger.log("🚀 FUNCTION: Function node closed (queue mode disabled)")
-				},
+			logger.log("🚀 FUNCTION: Queue mode disabled, using in-memory registry")
+
+			// For in-memory mode, register function so CallFunction can find it in dropdown
+			try {
+				const { getFunctionRegistry } = await import("../FunctionRegistryFactory")
+				const registry = await getFunctionRegistry()
+
+				const workflowId = this.getWorkflow().id || "unknown"
+				await registry.registerFunction({
+					name: functionName,
+					scope: workflowId,
+					code: "", // No code - this is a workflow trigger
+					parameters: parameters,
+					workflowId: workflowId,
+					nodeId: this.getNode().id,
+					description: functionDescription || "",
+				})
+
+				logger.log("🚀 FUNCTION: ✅ Function registered in in-memory registry")
+				logger.log("🚀 FUNCTION: ✅ Function available for CallFunction dropdown")
+
+				return {
+					closeFunction: async () => {
+						logger.log("🚀 FUNCTION: Function node closed (in-memory mode)")
+						// Unregister from in-memory registry on close
+						try {
+							await registry.unregisterFunction(functionName, workflowId)
+							logger.log("🚀 FUNCTION: ✅ Function unregistered from in-memory registry")
+						} catch (error) {
+							logger.warn("🚀 FUNCTION: ⚠️ Error unregistering from in-memory registry:", error)
+						}
+					},
+				}
+			} catch (error) {
+				logger.error("🚀 FUNCTION: ❌ Failed to register function in in-memory mode:", error)
+				return {
+					closeFunction: async () => {
+						logger.log("🚀 FUNCTION: Function node closed (in-memory mode - registration failed)")
+					},
+				}
 			}
 		}
 

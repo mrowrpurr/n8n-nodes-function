@@ -1,11 +1,16 @@
-# Lightweight closeFunction Fix - COMPLETED
+# Function Node Fixes - COMPLETED
 
-## Problem
+## Problem 1: Queue Mode Hanging After Workflow Saves
 Our Function node's `closeFunction` was doing too much, making it non-restartable:
 - Unregistering workers from registry
 - Marking workers as unhealthy
-- Complex cleanup sequences
-- **Result:** After workflow saves, CallFunction couldn't find healthy workers
+- Stopping lifecycle manager (putting consumer in "stopping" state)
+- **Result:** After workflow saves, CallFunction couldn't find healthy workers or consumer couldn't process calls
+
+## Problem 2: In-Memory Mode Functions Not Appearing in Dropdown
+Function nodes in in-memory mode were not registering themselves:
+- Early return without registration
+- **Result:** CallFunction dropdown was empty in in-memory mode
 
 ## Root Cause Analysis
 From `N8N_ACTUAL_LIFECYCLE_INFO.md` research:
@@ -59,25 +64,51 @@ From `explain-this-please.log` analysis:
 
 The issue wasn't worker availability - it was that `closeFunction` was stopping the consumer, making it unable to process new function calls.
 
+## The Fixes
+
+### Fix 1: Ultra-Lightweight closeFunction (Queue Mode)
+**Changed [`Function.node.ts`](nodes/Function/Function.node.ts:295):**
+```typescript
+// OLD: Stop lifecycle manager (puts consumer in "stopping" state)
+await lifecycleManager.stop()
+
+// NEW: Keep consumer ACTIVE
+// DON'T stop lifecycle manager - keep consumer ACTIVE to process messages
+// Only stop health updates
+```
+
+### Fix 2: In-Memory Mode Registration
+**Added to [`Function.node.ts`](nodes/Function/Function.node.ts:174):**
+```typescript
+// For in-memory mode, register function so CallFunction can find it
+const registry = await getFunctionRegistry()
+await registry.registerFunction({
+    name: functionName,
+    scope: workflowId,
+    code: "",
+    parameters: parameters,
+    workflowId: workflowId,
+    nodeId: this.getNode().id,
+    description: functionDescription || "",
+})
+```
+
 ## Expected Behavior
+### Queue Mode:
 1. User creates workflow with Function node → Works
 2. User adds CallFunction node → n8n calls `closeFunction`
 3. **Function node keeps consumer ACTIVE, worker stays registered**
 4. CallFunction sends wake-up → Consumer processes call immediately → Works
 5. No more timeouts or hanging calls
 
-## Logging Added
-- Track when `trigger()` is called (workflow activation/restart)
-- Track when `closeFunction()` is called (workflow changes/deactivation)
-- Track worker registration status
-- Clear separation between startup and shutdown events
+### In-Memory Mode:
+1. User creates workflow with Function node → Function registers in in-memory registry
+2. User opens CallFunction dropdown → Function appears in list
+3. User can select and call function → Works
 
 ## Files Modified
-- `nodes/Function/Function.node.ts` - Lightweight closeFunction implementation
+- `nodes/Function/Function.node.ts` - Both fixes implemented
 
-## Test Plan
-1. Create workflow with Function node
-2. Add CallFunction node and save
-3. Check logs for clean shutdown without worker unregistration
-4. Verify CallFunction can immediately find healthy worker
-5. No more 30-second timeouts or hanging calls
+## Test Results
+- ✅ **Queue mode working perfectly** - no more hanging calls after workflow saves
+- ✅ **In-memory mode registration** - functions now appear in CallFunction dropdown
