@@ -44,6 +44,12 @@ export class FunctionRegistry {
 	private connectionManager: RedisConnectionManager
 	private circuitBreaker: CircuitBreaker
 	private returnValues: Map<string, any> = new Map()
+
+	// In-memory storage for non-queue mode
+	private inMemoryFunctions: Map<string, FunctionDefinition> = new Map()
+	private workflowFunctionCache: Map<string, Set<string>> = new Map()
+	private functionToWorkflowCache: Map<string, string> = new Map()
+
 	private readonly WORKER_TIMEOUT = 30000 // 30 seconds
 	private readonly CALL_TIMEOUT = 300000 // 5 minutes
 	private readonly STREAM_READY_TIMEOUT = 5000 // 5 seconds
@@ -78,8 +84,14 @@ export class FunctionRegistry {
 	 * Register a function with robust state management
 	 */
 	async registerFunction(definition: FunctionDefinition): Promise<void> {
+		// Always store in memory for in-memory mode support
+		const functionKey = `${definition.name}:${definition.scope}`
+		this.inMemoryFunctions.set(functionKey, definition)
+		this.updateWorkflowCache(definition.name, definition.workflowId)
+		logger.log("🏗️ REGISTRY: Function stored in memory:", definition.name, "scope:", definition.scope)
+
 		if (!isQueueModeEnabled()) {
-			logger.log("🏗️ REGISTRY: Queue mode disabled, skipping function registration")
+			logger.log("🏗️ REGISTRY: Queue mode disabled, using in-memory storage only")
 			return
 		}
 
@@ -115,6 +127,15 @@ export class FunctionRegistry {
 	 * Unregister a function
 	 */
 	async unregisterFunction(functionName: string, scope: string): Promise<void> {
+		// Always clean up in-memory storage
+		const functionKey = `${functionName}:${scope}`
+		const definition = this.inMemoryFunctions.get(functionKey)
+		if (definition) {
+			this.inMemoryFunctions.delete(functionKey)
+			this.removeFromWorkflowCache(functionName, definition.workflowId)
+			logger.log("🏗️ REGISTRY: Function removed from memory:", functionName, "scope:", scope)
+		}
+
 		if (!isQueueModeEnabled()) {
 			return
 		}
@@ -222,8 +243,32 @@ export class FunctionRegistry {
 	 * Get available functions for a workflow
 	 */
 	async getAvailableFunctions(workflowId: string): Promise<Array<{ name: string; value: string; description: string }>> {
+		// Handle in-memory mode first
 		if (!isQueueModeEnabled()) {
-			return []
+			logger.log("🏗️ REGISTRY: Queue mode disabled, using in-memory functions for workflow:", workflowId)
+			const functions: Array<{ name: string; value: string; description: string }> = []
+
+			// Get functions for this specific workflow from cache
+			const workflowFunctions = this.getFunctionsForWorkflow(workflowId)
+			logger.log("🏗️ REGISTRY: Found functions in workflow cache:", workflowFunctions)
+
+			for (const functionName of workflowFunctions) {
+				// Find the function definition in memory
+				for (const [, definition] of this.inMemoryFunctions.entries()) {
+					if (definition.name === functionName && definition.workflowId === workflowId) {
+						const description = definition.description && definition.description.trim() ? definition.description : `Function: ${functionName}`
+						functions.push({
+							name: functionName,
+							value: functionName,
+							description: description,
+						})
+						break
+					}
+				}
+			}
+
+			logger.log("🏗️ REGISTRY: Available in-memory functions for workflow", workflowId, ":", functions.length)
+			return functions
 		}
 
 		return await this.circuitBreaker.execute(async () => {
@@ -258,7 +303,19 @@ export class FunctionRegistry {
 	 * Get function parameters
 	 */
 	async getFunctionParameters(functionName: string, workflowId: string): Promise<FunctionParameter[]> {
+		// Handle in-memory mode first
 		if (!isQueueModeEnabled()) {
+			logger.log("🏗️ REGISTRY: Queue mode disabled, getting parameters from memory for:", functionName)
+
+			// Find function in memory by name and workflow
+			for (const [, definition] of this.inMemoryFunctions.entries()) {
+				if (definition.name === functionName && definition.workflowId === workflowId) {
+					logger.log("🏗️ REGISTRY: Found function parameters in memory:", definition.parameters)
+					return definition.parameters
+				}
+			}
+
+			logger.log("🏗️ REGISTRY: Function not found in memory:", functionName)
 			return []
 		}
 
@@ -647,12 +704,36 @@ export class FunctionRegistry {
 	 * Direct function call (fallback for non-queue mode)
 	 */
 	async callFunction(functionName: string, scope: string, parameters: any, item: any): Promise<CallResult> {
-		// This is a fallback method for non-queue mode
-		// In the new architecture, all calls should go through Redis streams
-		logger.log("🏗️ REGISTRY: Direct function call not supported in hardened architecture")
+		// Handle in-memory mode with direct function calls
+		if (!isQueueModeEnabled()) {
+			logger.log("🏗️ REGISTRY: Direct in-memory function call:", functionName, "scope:", scope)
+
+			// Find function in memory
+			const functionKey = `${functionName}:${scope}`
+			const definition = this.inMemoryFunctions.get(functionKey)
+
+			if (!definition) {
+				logger.log("🏗️ REGISTRY: Function not found in memory:", functionName)
+				return {
+					success: false,
+					error: `Function '${functionName}' not found in scope '${scope}'`,
+				}
+			}
+
+			// For in-memory mode, we can't execute the function directly since we don't store callbacks
+			// This is a limitation - in-memory mode needs the Function node to handle execution
+			logger.log("🏗️ REGISTRY: Function found in memory but execution requires Function node callback")
+			return {
+				success: false,
+				error: "In-memory function calls require Function node execution context",
+			}
+		}
+
+		// Queue mode - use Redis streams architecture
+		logger.log("🏗️ REGISTRY: Direct function call not supported in queue mode - use Redis streams")
 		return {
 			success: false,
-			error: "Direct function calls not supported. Use queue mode with Redis streams.",
+			error: "Direct function calls not supported in queue mode. Use Redis streams.",
 		}
 	}
 
@@ -908,6 +989,56 @@ export class FunctionRegistry {
 		logger.log("🏗️ REGISTRY: Shutting down function registry...")
 		await this.connectionManager.shutdown()
 		this.returnValues.clear()
+		this.inMemoryFunctions.clear()
+		this.workflowFunctionCache.clear()
+		this.functionToWorkflowCache.clear()
 		logger.log("🏗️ REGISTRY: ✅ Function registry shutdown completed")
+	}
+
+	/**
+	 * Update workflow cache for proper function scoping (in-memory mode)
+	 */
+	private updateWorkflowCache(functionName: string, workflowId: string): void {
+		logger.log(`📋 Updating workflow cache: ${functionName} -> ${workflowId}`)
+
+		// Add function to workflow's function set
+		if (!this.workflowFunctionCache.has(workflowId)) {
+			this.workflowFunctionCache.set(workflowId, new Set())
+		}
+		this.workflowFunctionCache.get(workflowId)!.add(functionName)
+
+		// Map function to workflow
+		this.functionToWorkflowCache.set(functionName, workflowId)
+
+		logger.log(`📋 Cache updated - Workflow ${workflowId} now has functions:`, Array.from(this.workflowFunctionCache.get(workflowId)!))
+	}
+
+	/**
+	 * Remove from workflow cache (in-memory mode)
+	 */
+	private removeFromWorkflowCache(functionName: string, workflowId: string): void {
+		logger.log(`📋 Removing from workflow cache: ${functionName} from ${workflowId}`)
+
+		// Remove function from workflow's function set
+		const workflowFunctions = this.workflowFunctionCache.get(workflowId)
+		if (workflowFunctions) {
+			workflowFunctions.delete(functionName)
+			if (workflowFunctions.size === 0) {
+				this.workflowFunctionCache.delete(workflowId)
+			}
+		}
+
+		// Remove function to workflow mapping
+		this.functionToWorkflowCache.delete(functionName)
+
+		logger.log(`📋 Cache cleaned - Workflow ${workflowId} functions:`, workflowFunctions ? Array.from(workflowFunctions) : [])
+	}
+
+	/**
+	 * Get functions for specific workflow (in-memory mode)
+	 */
+	private getFunctionsForWorkflow(workflowId: string): string[] {
+		const functions = this.workflowFunctionCache.get(workflowId)
+		return functions ? Array.from(functions) : []
 	}
 }
