@@ -365,30 +365,7 @@ export class FunctionRegistry {
 					timestamp: Date.now().toString(),
 				}
 
-				const messageId = await client.xAdd(streamKey, "*", callData)
-
-				console.log(`📝📝📝 STREAM-ADD: Message added to stream with ID: ${messageId}`)
-				console.log(`📝📝📝 STREAM-ADD: Stream key: ${streamKey}`)
-				console.log(`📝📝📝 STREAM-ADD: Call ID: ${callId}`)
-
-				// Extract group name from stream key pattern
-				// streamKey format: "n8n-nodes-function:function_calls:FunctionName:Scope"
-				// groupName format: "n8n-nodes-function:function_group:FunctionName:Scope"
-				const groupName = streamKey.replace(":function_calls:", ":function_group:")
-				console.log(`📝📝📝 STREAM-ADD: Group name: ${groupName}`)
-
-				// Immediately check if message is visible to consumers
-				try {
-					const streamInfo = await client.xPending(streamKey, groupName)
-					console.log(`📝📝📝 STREAM-VISIBILITY: After adding message, stream has ${streamInfo.pending} pending messages`)
-
-					// Also check what messages are available for new reads
-					const availableMessages = await client.xReadGroup(groupName, "diagnostic-check", [{ key: streamKey, id: ">" }], { COUNT: 1, BLOCK: 0 })
-					console.log(`📝📝📝 STREAM-VISIBILITY: Available for new reads:`, availableMessages ? `${availableMessages.length} streams` : "none")
-				} catch (error) {
-					console.log(`📝📝📝 STREAM-VISIBILITY: Error checking stream state:`, error.message)
-				}
-
+				await client.xAdd(streamKey, "*", callData)
 				logger.log("🏗️ REGISTRY: ✅ Call added to stream:", callId)
 			}, `add-call-${callId}`)
 		}, `add-call-${callId}`)
