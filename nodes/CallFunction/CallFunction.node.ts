@@ -526,14 +526,96 @@ export class CallFunction implements INodeType {
 				console.log("🔍 CALLFUNCTION: Queue mode enabled =", queueModeStatus)
 				logger.debug("🔍 CallFunction: Queue mode enabled =", queueModeStatus)
 
-				// In queue mode, also check if we have Redis configuration
-				console.log("🚀🚀🚀 CALLFUNCTION: Getting enhanced registry...")
+				// SURGICAL FIX: Branch early for in-memory mode to avoid ALL Redis operations
+				if (!queueModeStatus) {
+					console.log("🔧🔧🔧 CALLFUNCTION: IN-MEMORY MODE - Using simple direct call (like old code)")
+					logger.log("🔧 CallFunction: Using direct in-memory call (no Redis)")
+
+					// Get basic registry only (no enhanced features)
+					const registry = await getFunctionRegistry()
+
+					// Call function directly via registry (old simple pattern)
+					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
+
+					if (!callResult.result) {
+						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
+					}
+
+					logger.log("🔧 CallFunction: Direct call result:", callResult.result)
+
+					// Process the result - callResult.result is an array of INodeExecutionData
+					for (const resultItem of callResult.result) {
+						// Check if function returned a value via ReturnFromFunction node
+						logger.log("🔧 CallFunction: About to check for return value...")
+
+						// Extract the callId from the _functionCall metadata in the result
+						let returnValueKey = callResult.actualExecutionId
+						if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
+							const functionCallData = resultItem.json._functionCall as any
+							if (functionCallData.callId) {
+								returnValueKey = functionCallData.callId
+								logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
+							} else {
+								logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
+							}
+						} else {
+							logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
+						}
+
+						const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
+						logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
+
+						let finalReturnValue = resultItem.json
+
+						// Clear the return value from registry after retrieving it
+						if (returnValue !== null) {
+							logger.log("🔧 CallFunction: Clearing return value from registry...")
+							await registry.clearFunctionReturnValue(returnValueKey!)
+							logger.log("🔧 CallFunction: Return value cleared")
+							finalReturnValue = returnValue
+						} else {
+							// Clean up any _functionCall metadata from the result
+							const cleanedJson = { ...resultItem.json }
+							delete cleanedJson._functionCall
+							finalReturnValue = cleanedJson
+						}
+
+						// Start with the original item
+						let resultJson: any = { ...item.json }
+
+						// Store response if requested
+						if (storeResponse && responseVariableName && responseVariableName.trim()) {
+							// Store under specific variable name
+							resultJson[responseVariableName] = finalReturnValue
+						} else {
+							// Default behavior: merge the function result directly into the item
+							if (typeof finalReturnValue === "object" && finalReturnValue !== null && !Array.isArray(finalReturnValue)) {
+								// If result is an object, merge its properties
+								resultJson = { ...resultJson, ...finalReturnValue }
+							} else {
+								// If result is not an object, store under 'result' key
+								resultJson.result = finalReturnValue
+							}
+						}
+
+						const finalResultItem: INodeExecutionData = {
+							json: resultJson,
+							index: itemIndex,
+							binary: resultItem.binary || item.binary,
+						}
+
+						logger.log("🔧 CallFunction: Created result item =", finalResultItem)
+						returnData.push(finalResultItem)
+					}
+					continue // Skip to next item - in-memory processing complete
+				}
+
+				// QUEUE MODE ONLY - Enhanced registry with Redis streams
+				console.log("🚀🚀🚀 CALLFUNCTION: QUEUE MODE - Using enhanced registry with Redis")
 				const enhancedRegistry = await getEnhancedFunctionRegistry()
 				console.log("🚀🚀🚀 CALLFUNCTION: Enhanced registry obtained:", !!enhancedRegistry)
 				const registry = await getFunctionRegistry() // Keep original for fallback
 				console.log("🚀🚀🚀 CALLFUNCTION: Standard registry obtained:", !!registry)
-				const useRedisStreams = queueModeStatus
-				console.log("🚀🚀🚀 CALLFUNCTION: Use Redis streams =", useRedisStreams)
 
 				// Set up shutdown notification listener for instant restart detection
 				let shutdownDetected = false
@@ -554,7 +636,8 @@ export class CallFunction implements INodeType {
 					}
 				}
 
-				if (useRedisStreams) {
+				// Queue mode Redis streams logic
+				if (queueModeStatus) {
 					console.log("🌊🌊🌊 CALLFUNCTION: USING REDIS STREAMS FOR FUNCTION CALL")
 					logger.log("🌊 CallFunction: Using Redis streams for function call with instant readiness")
 
@@ -852,82 +935,6 @@ export class CallFunction implements INodeType {
 
 					logger.log("🌊 CallFunction: Created result item =", resultItem)
 					returnData.push(resultItem)
-				} else {
-					logger.log("🔧 CallFunction: Using direct in-memory call")
-
-					// Call function directly via registry
-					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
-
-					if (!callResult.result) {
-						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
-					}
-
-					logger.log("🔧 CallFunction: Direct call result:", callResult.result)
-
-					// Process the result - callResult.result is an array of INodeExecutionData
-					for (const resultItem of callResult.result) {
-						// Check if function returned a value via ReturnFromFunction node
-						logger.log("🔧 CallFunction: About to check for return value...")
-
-						// Extract the callId from the _functionCall metadata in the result
-						let returnValueKey = callResult.actualExecutionId
-						if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
-							const functionCallData = resultItem.json._functionCall as any
-							if (functionCallData.callId) {
-								returnValueKey = functionCallData.callId
-								logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
-							} else {
-								logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
-							}
-						} else {
-							logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
-						}
-
-						const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
-						logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
-
-						let finalReturnValue = resultItem.json
-
-						// Clear the return value from registry after retrieving it
-						if (returnValue !== null) {
-							logger.log("🔧 CallFunction: Clearing return value from registry...")
-							await registry.clearFunctionReturnValue(returnValueKey!)
-							logger.log("🔧 CallFunction: Return value cleared")
-							finalReturnValue = returnValue
-						} else {
-							// Clean up any _functionCall metadata from the result
-							const cleanedJson = { ...resultItem.json }
-							delete cleanedJson._functionCall
-							finalReturnValue = cleanedJson
-						}
-
-						// Start with the original item
-						let resultJson: any = { ...item.json }
-
-						// Store response if requested
-						if (storeResponse && responseVariableName && responseVariableName.trim()) {
-							// Store under specific variable name
-							resultJson[responseVariableName] = finalReturnValue
-						} else {
-							// Default behavior: merge the function result directly into the item
-							if (typeof finalReturnValue === "object" && finalReturnValue !== null && !Array.isArray(finalReturnValue)) {
-								// If result is an object, merge its properties
-								resultJson = { ...resultJson, ...finalReturnValue }
-							} else {
-								// If result is not an object, store under 'result' key
-								resultJson.result = finalReturnValue
-							}
-						}
-
-						const finalResultItem: INodeExecutionData = {
-							json: resultJson,
-							index: itemIndex,
-							binary: resultItem.binary || item.binary,
-						}
-
-						logger.log("🔧 CallFunction: Created result item =", finalResultItem)
-						returnData.push(finalResultItem)
-					}
 				}
 			} catch (error) {
 				console.log("❌❌❌ CALLFUNCTION: CAUGHT ERROR IN MAIN TRY-CATCH:", error)

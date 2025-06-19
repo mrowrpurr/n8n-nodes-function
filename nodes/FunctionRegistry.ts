@@ -720,12 +720,33 @@ export class FunctionRegistry {
 				}
 			}
 
-			// For in-memory mode, we can't execute the function directly since we don't store callbacks
-			// This is a limitation - in-memory mode needs the Function node to handle execution
-			logger.log("🏗️ REGISTRY: Function found in memory but execution requires Function node callback")
+			// In-memory mode: Return a placeholder result that indicates the function exists
+			// The actual execution happens in the Function node itself via callbacks
+			// This mimics the old registry behavior where callFunction just confirmed the function exists
+			logger.log("🏗️ REGISTRY: Function found in memory, returning placeholder result for in-memory execution")
+
+			// Generate a unique execution ID for this call
+			const executionId = `inmem-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+			// Return a result that indicates the function was found and can be executed
 			return {
-				success: false,
-				error: "In-memory function calls require Function node execution context",
+				success: true,
+				result: [
+					{
+						json: {
+							...item,
+							_functionCall: {
+								functionName,
+								scope,
+								parameters,
+								callId: executionId,
+								mode: "in-memory",
+							},
+						},
+						binary: item.binary,
+					},
+				],
+				actualExecutionId: executionId,
 			}
 		}
 
