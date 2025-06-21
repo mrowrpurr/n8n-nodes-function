@@ -26,6 +26,7 @@ export class CallFunction implements INodeType {
 		},
 		inputs: [NodeConnectionType.Main],
 		outputs: [NodeConnectionType.Main],
+		usableAsTool: true,
 		properties: [
 			{
 				displayName: "ℹ️ If function details are out-of-date, toggle Active off/on for the workflow containing the function",
