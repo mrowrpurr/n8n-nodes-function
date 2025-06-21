@@ -134,14 +134,46 @@ export class CallFunctionTool implements INodeType {
 				default: "",
 			},
 			{
-				displayName: "Tool Description",
-				name: "toolDescription",
+				displayName: "Set Custom Function Name",
+				name: "setCustomFunctionName",
+				type: "boolean",
+				default: false,
+				description: "Whether to override the function name that the AI agent sees. By default, uses the Function node's name.",
+			},
+			{
+				displayName: "Custom Function Name",
+				name: "customFunctionName",
 				type: "string",
-				description: "Explain to the AI agent what this function does and when to use it",
+				description: "Custom name for the function that the AI agent will see",
+				placeholder: "e.g. calculate_tax",
+				default: "",
+				displayOptions: {
+					show: {
+						setCustomFunctionName: [true],
+					},
+				},
+			},
+			{
+				displayName: "Set Custom Function Description",
+				name: "setCustomFunctionDescription",
+				type: "boolean",
+				default: false,
+				description: "Whether to override the function description that the AI agent sees. By default, uses the Function node's description.",
+			},
+			{
+				displayName: "Custom Function Description",
+				name: "customFunctionDescription",
+				type: "string",
+				description: "Custom description for the function that the AI agent will see",
 				placeholder: "e.g. Calculate the total price including tax for a given amount",
 				default: "",
 				typeOptions: {
 					rows: 3,
+				},
+				displayOptions: {
+					show: {
+						setCustomFunctionDescription: [true],
+					},
 				},
 			},
 			{
@@ -337,7 +369,10 @@ export class CallFunctionTool implements INodeType {
 	}
 
 	async supplyData(this: ISupplyDataFunctions): Promise<SupplyData> {
-		const toolDescription = this.getNodeParameter("toolDescription", 0) as string
+		const setCustomFunctionName = this.getNodeParameter("setCustomFunctionName", 0, false) as boolean
+		const customFunctionName = this.getNodeParameter("customFunctionName", 0, "") as string
+		const setCustomFunctionDescription = this.getNodeParameter("setCustomFunctionDescription", 0, false) as boolean
+		const customFunctionDescription = this.getNodeParameter("customFunctionDescription", 0, "") as string
 		const workflowSelector = this.getNodeParameter("workflowId", 0) as any
 		const functionName = this.getNodeParameter("functionName", 0) as string
 		const parameterSchema = this.getNodeParameter("parameterSchema", 0, "auto") as string
@@ -365,13 +400,47 @@ export class CallFunctionTool implements INodeType {
 			)
 		}
 
+		// Fetch function name and description from registry
+		const registry = await getFunctionRegistry()
+		let actualFunctionName = functionName
+		let actualFunctionDescription = `Call the ${functionName} function`
+
+		try {
+			// Get available functions to fetch the function's name and description
+			const availableFunctions = await registry.getAvailableFunctions(workflowId)
+			const selectedFunction = availableFunctions.find((f) => f.value === functionName)
+
+			if (selectedFunction) {
+				actualFunctionName = selectedFunction.name
+				actualFunctionDescription = selectedFunction.description
+				logger.log("🔧 CallFunctionTool: Found function in registry:", {
+					name: actualFunctionName,
+					description: actualFunctionDescription,
+				})
+			} else {
+				logger.warn("🔧 CallFunctionTool: Function not found in registry, using fallback")
+			}
+		} catch (error) {
+			logger.warn("🔧 CallFunctionTool: Failed to fetch function details from registry:", error)
+		}
+
+		// Apply custom overrides if enabled
+		const finalFunctionName = setCustomFunctionName && customFunctionName ? customFunctionName : actualFunctionName
+		const finalFunctionDescription = setCustomFunctionDescription && customFunctionDescription ? customFunctionDescription : actualFunctionDescription
+
+		logger.log("🔧 CallFunctionTool: Final function details:", {
+			name: finalFunctionName,
+			description: finalFunctionDescription,
+			usingCustomName: setCustomFunctionName && customFunctionName,
+			usingCustomDescription: setCustomFunctionDescription && customFunctionDescription,
+		})
+
 		// Get parameter definitions
 		let parameterDefinitions: Array<{ name: string; description?: string; type: string; required: boolean }> = []
 
 		if (parameterSchema === "auto") {
 			// Auto-detect parameters from the function
 			try {
-				const registry = await getFunctionRegistry()
 				const functionParams = await registry.getFunctionParameters(functionName, workflowId)
 				parameterDefinitions = functionParams.map((param: any) => ({
 					name: param.name,
@@ -398,7 +467,7 @@ export class CallFunctionTool implements INodeType {
 		}
 
 		// Build the tool description
-		let finalDescription = toolDescription || `Call the ${functionName} function`
+		let finalDescription = finalFunctionDescription
 
 		if (parameterDefinitions.length > 0) {
 			finalDescription += "\n\nParameters:"
@@ -410,8 +479,10 @@ export class CallFunctionTool implements INodeType {
 
 		// Log the complete tool schema that the AI agent will see
 		logger.log("🔧 CallFunctionTool: Complete tool schema for AI agent:", {
-			toolName: this.getNode().name.replace(/ /g, "_"),
-			functionName,
+			toolName: finalFunctionName.replace(/ /g, "_"),
+			originalFunctionName: functionName,
+			actualFunctionName: actualFunctionName,
+			finalFunctionName: finalFunctionName,
 			workflowId,
 			schemaMode: parameterSchema,
 			parameterDefinitions,
@@ -419,6 +490,10 @@ export class CallFunctionTool implements INodeType {
 			parameterCount: parameterDefinitions.length,
 			requiredParameters: parameterDefinitions.filter((p) => p.required).map((p) => p.name),
 			optionalParameters: parameterDefinitions.filter((p) => !p.required).map((p) => p.name),
+			customOverrides: {
+				name: setCustomFunctionName && customFunctionName,
+				description: setCustomFunctionDescription && customFunctionDescription,
+			},
 		})
 
 		logger.log("🔧 CallFunctionTool: Final tool description:", finalDescription)
@@ -521,12 +596,12 @@ export class CallFunctionTool implements INodeType {
 
 		// Create a DynamicTool object that can be used by AI agents
 		const tool = new DynamicTool({
-			name: this.getNode().name.replace(/ /g, "_"),
+			name: finalFunctionName.replace(/ /g, "_"),
 			description: finalDescription,
 			func: toolFunction,
 		})
 
-		logger.log("🔧 CallFunctionTool: Tool created successfully")
+		logger.log("🔧 CallFunctionTool: Tool created successfully with name:", finalFunctionName)
 
 		// Apply the log wrapper to make the tool visible in AI Agent logs
 		const wrappedTool = toolLogWrapper(tool, this)
