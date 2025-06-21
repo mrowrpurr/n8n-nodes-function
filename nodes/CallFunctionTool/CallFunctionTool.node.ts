@@ -1,3 +1,4 @@
+import { DynamicTool } from "@langchain/core/tools"
 import {
 	NodeConnectionType,
 	type INodeType,
@@ -10,13 +11,6 @@ import {
 import { getFunctionRegistry } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
 import { FunctionCallService } from "../services/FunctionCallService"
-
-// Simple tool interface that mimics LangChain's DynamicTool
-interface SimpleTool {
-	name: string
-	description: string
-	func: (input: string | Record<string, any>) => Promise<string>
-}
 
 export class CallFunctionTool implements INodeType {
 	description: INodeTypeDescription = {
@@ -383,12 +377,12 @@ export class CallFunctionTool implements INodeType {
 			}
 		}
 
-		// Create a simple tool object that can be used by AI agents
-		const tool: SimpleTool = {
+		// Create a DynamicTool object that can be used by AI agents
+		const tool = new DynamicTool({
 			name: this.getNode().name.replace(/ /g, "_"),
 			description: finalDescription,
 			func: toolFunction,
-		}
+		})
 
 		logger.log("🔧 CallFunctionTool: Tool created successfully")
 

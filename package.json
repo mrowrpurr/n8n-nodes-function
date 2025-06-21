@@ -35,6 +35,7 @@
 		"nodes": [
 			"dist/nodes/Function/Function.node.js",
 			"dist/nodes/CallFunction/CallFunction.node.js",
+			"dist/nodes/CallFunctionTool/CallFunctionTool.node.js",
 			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js",
 			"dist/nodes/TestTrigger/TestTrigger.node.js"
 		]
@@ -52,7 +53,9 @@
 	},
 	"packageManager": "pnpm@10.5.0+sha512.11106a5916c7406fe4b8cb8e3067974b8728f47308a4f5ac5e850304afa6f57e2847d7950dfe78877d8d36bfb401d381c4215db3a4c3547ffa63c14333a6fa51",
 	"dependencies": {
+		"@langchain/core": "^0.3.61",
 		"@types/node": "^24.0.1",
+		"langchain": "^0.3.29",
 		"redis": "^5.5.6"
 	}
 }
