@@ -7,9 +7,9 @@ import {
 	type ILoadOptionsFunctions,
 	NodeOperationError,
 } from "n8n-workflow"
-import { getFunctionRegistry, getEnhancedFunctionRegistry, isQueueModeEnabled, REDIS_KEY_PREFIX } from "../FunctionRegistryFactory"
+import { getFunctionRegistry } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
-import { EnhancedFunctionRegistry } from "../EnhancedFunctionRegistry"
+import { FunctionCallService } from "../services/FunctionCallService"
 
 export class CallFunction implements INodeType {
 	description: INodeTypeDescription = {
@@ -387,25 +387,11 @@ export class CallFunction implements INodeType {
 	}
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		// ALWAYS LOG WHEN CALLFUNCTION STARTS - NO MATTER WHAT
-		console.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION STARTED =====")
-		console.log("🔥🔥🔥 CALLFUNCTION: CallFunction node is now executing")
-		console.log("🔥🔥🔥 CALLFUNCTION: Timestamp:", new Date().toISOString())
 		logger.log(`🔥🔥🔥 CALLFUNCTION: ===== EXECUTION STARTED =====`)
-
-		console.log("�🚀🚀 CALLFUNCTION: EXECUTE METHOD CALLED")
 		logger.log(`🚀🚀🚀 CALLFUNCTION: Starting execution`)
-		const items = this.getInputData()
-		console.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
-		logger.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
 
-		// Debug: Log all node parameters
-		try {
-			const nodeParams = this.getNode().parameters
-			logger.log(`Node parameters:`, JSON.stringify(nodeParams, null, 2))
-		} catch (error) {
-			logger.log(`Could not get node parameters:`, error.message)
-		}
+		const items = this.getInputData()
+		logger.log(`🚀🚀🚀 CALLFUNCTION: Input items count =`, items.length)
 
 		const returnData: INodeExecutionData[] = []
 
@@ -426,7 +412,6 @@ export class CallFunction implements INodeType {
 				workflowId = workflowSelector
 			}
 
-			logger.log(`Selected workflow selector =`, workflowSelector)
 			logger.log(`Extracted workflow ID =`, workflowId)
 			logger.log(`Function name =`, functionName)
 			logger.log(`Parameter mode =`, parameterMode)
@@ -444,12 +429,6 @@ export class CallFunction implements INodeType {
 				)
 			}
 
-			// Get function parameter definitions for validation
-			const registry = await getFunctionRegistry()
-			const functionParameterDefs = await registry.getFunctionParameters(functionName, workflowId)
-
-			const validParameterNames = new Set(functionParameterDefs.map((p: any) => p.name))
-
 			// Prepare parameters to pass to the function
 			let functionParameters: Record<string, any> = {}
 
@@ -466,6 +445,11 @@ export class CallFunction implements INodeType {
 				const parameters = this.getNodeParameter("parameters", itemIndex, {}) as any
 				const parameterList = parameters.parameter || []
 				logger.log("🔧 CallFunction: Parameter list =", parameterList)
+
+				// Get function parameter definitions for validation
+				const registry = await getFunctionRegistry()
+				const functionParameterDefs = await registry.getFunctionParameters(functionName, workflowId)
+				const validParameterNames = new Set(functionParameterDefs.map((p: any) => p.name))
 
 				// Validate parameters and filter out invalid ones
 				const validParameters = []
@@ -509,420 +493,40 @@ export class CallFunction implements INodeType {
 
 			logger.log("🔧 CallFunction: Final parameters =", functionParameters)
 
-			// Use the selected workflow ID as the target scope
-			const targetScope = workflowId
-
-			logger.log("🔧 CallFunction: Target scope =", targetScope)
-
-			// Use the registry instance to call the function
 			const item = items[itemIndex]
 
 			try {
-				console.log("🚀🚀🚀 CALLFUNCTION: ENTERING TRY BLOCK FOR FUNCTION CALL")
-				// Check if queue mode is enabled to determine call method
-				console.log("🔍 CALLFUNCTION: Checking queue mode status...")
-				logger.debug("🔍 CallFunction: Checking queue mode status...")
-				const queueModeStatus = isQueueModeEnabled()
-				console.log("🔍 CALLFUNCTION: Queue mode enabled =", queueModeStatus)
-				logger.debug("🔍 CallFunction: Queue mode enabled =", queueModeStatus)
+				// Use the FunctionCallService to handle the function call
+				const result = await FunctionCallService.callFunction({
+					functionName,
+					workflowId,
+					parameters: functionParameters,
+					inputData: item,
+				})
 
-				// SURGICAL FIX: Branch early for in-memory mode to avoid ALL Redis operations
-				if (!queueModeStatus) {
-					console.log("🔧🔧🔧 CALLFUNCTION: IN-MEMORY MODE - Using simple direct call (like old code)")
-					logger.log("🔧 CallFunction: Using direct in-memory call (no Redis)")
-
-					// Get basic registry only (no enhanced features)
-					const registry = await getFunctionRegistry()
-
-					// Call function directly via registry (old simple pattern)
-					const callResult = await registry.callFunction(functionName, targetScope, functionParameters, item)
-
-					if (!callResult.result) {
-						throw new NodeOperationError(this.getNode(), `Function '${functionName}' not found or no workers available`)
-					}
-
-					logger.log("🔧 CallFunction: Direct call result:", callResult.result)
-
-					// Process the result - callResult.result is an array of INodeExecutionData
-					for (const resultItem of callResult.result) {
-						// Check if function returned a value via ReturnFromFunction node
-						logger.log("🔧 CallFunction: About to check for return value...")
-						logger.log("🔧 CallFunction: Result item JSON:", resultItem.json)
-
-						let finalReturnValue = resultItem.json
-
-						// Check if the result contains a _functionReturn field (new in-memory structure)
-						if (resultItem.json._functionReturn !== undefined) {
-							logger.log("🔧 CallFunction: Found _functionReturn in result:", resultItem.json._functionReturn)
-							finalReturnValue = resultItem.json._functionReturn
-						} else {
-							// Fallback: try to get return value from registry (old method)
-							logger.log("🔧 CallFunction: No _functionReturn found, trying registry lookup...")
-
-							// Extract the callId from the _functionCall metadata in the result
-							let returnValueKey = callResult.actualExecutionId
-							if (resultItem.json._functionCall && typeof resultItem.json._functionCall === "object") {
-								const functionCallData = resultItem.json._functionCall as any
-								if (functionCallData.callId) {
-									returnValueKey = functionCallData.callId
-									logger.log("🔧 CallFunction: Using callId from _functionCall metadata:", returnValueKey)
-								} else {
-									logger.log("🔧 CallFunction: No callId in _functionCall metadata, using actualExecutionId:", returnValueKey)
-								}
-							} else {
-								logger.log("🔧 CallFunction: No _functionCall metadata found, using actualExecutionId:", returnValueKey)
-							}
-
-							const returnValue = returnValueKey ? await registry.getFunctionReturnValue(returnValueKey) : null
-							logger.log("🔧 CallFunction: Function return value retrieved =", returnValue)
-
-							// Clear the return value from registry after retrieving it
-							if (returnValue !== null) {
-								logger.log("🔧 CallFunction: Clearing return value from registry...")
-								await registry.clearFunctionReturnValue(returnValueKey!)
-								logger.log("🔧 CallFunction: Return value cleared")
-								finalReturnValue = returnValue
-							} else {
-								// Clean up any _functionCall metadata from the result
-								const cleanedJson = { ...resultItem.json }
-								delete cleanedJson._functionCall
-								delete cleanedJson._functionReturn
-								finalReturnValue = cleanedJson
-							}
-						}
-
-						// Start with the original item
-						let resultJson: any = { ...item.json }
-
-						// Store response ONLY if requested
-						if (storeResponse && responseVariableName && responseVariableName.trim()) {
-							// Store under specific variable name
-							resultJson[responseVariableName] = finalReturnValue
-						}
-						// If storeResponse is false, don't include the function return value at all
-
-						const finalResultItem: INodeExecutionData = {
-							json: resultJson,
-							index: itemIndex,
-							binary: resultItem.binary || item.binary,
-						}
-
-						logger.log("🔧 CallFunction: Created result item =", finalResultItem)
-						returnData.push(finalResultItem)
-					}
-					continue // Skip to next item - in-memory processing complete
+				if (!result.success) {
+					throw new NodeOperationError(this.getNode(), result.error || `Function call failed`)
 				}
 
-				// QUEUE MODE ONLY - Enhanced registry with Redis streams
-				console.log("🚀🚀🚀 CALLFUNCTION: QUEUE MODE - Using enhanced registry with Redis")
-				const enhancedRegistry = await getEnhancedFunctionRegistry()
-				console.log("🚀🚀🚀 CALLFUNCTION: Enhanced registry obtained:", !!enhancedRegistry)
-				const registry = await getFunctionRegistry() // Keep original for fallback
-				console.log("🚀🚀🚀 CALLFUNCTION: Standard registry obtained:", !!registry)
+				// Start with the original item
+				let resultJson: any = { ...item.json }
 
-				// Set up shutdown notification listener for instant restart detection
-				let shutdownDetected = false
-				if (enhancedRegistry instanceof EnhancedFunctionRegistry) {
-					const notificationManager = enhancedRegistry["notificationManager"]
-					if (notificationManager) {
-						console.log("🚀🚀🚀 CALLFUNCTION: Setting up shutdown notification listener...")
-						const shutdownListener = (message: any) => {
-							if (message.type === "function-restart" && message.workflowId === workflowId) {
-								console.log(`📢📢📢 CALLFUNCTION: SHUTDOWN NOTIFICATION received for workflow ${workflowId}!`)
-								logger.log(`📢🚀 CALLFUNCTION: Function restart detected for workflow ${workflowId} - reason: ${message.reason}`)
-								shutdownDetected = true
-							}
-						}
+				// Store response ONLY if requested
+				if (result.data !== null && storeResponse && responseVariableName && responseVariableName.trim()) {
+					// Store under specific variable name
+					resultJson[responseVariableName] = result.data
+				}
+				// If storeResponse is false, don't include the function return value at all
 
-						await notificationManager.subscribeToShutdown(shutdownListener)
-						logger.log("🚀 CALLFUNCTION: ✅ Subscribed to shutdown notifications for instant restart detection")
-					}
+				const resultItem: INodeExecutionData = {
+					json: resultJson,
+					index: itemIndex,
+					binary: item.binary,
 				}
 
-				// Queue mode Redis streams logic
-				if (queueModeStatus) {
-					console.log("🌊🌊🌊 CALLFUNCTION: USING REDIS STREAMS FOR FUNCTION CALL")
-					logger.log("🌊 CallFunction: Using Redis streams for function call with instant readiness")
-
-					// Generate unique call ID
-					const callId = `call-${Date.now()}-${Math.random().toString(36).slice(2)}`
-					const responseChannel = `${REDIS_KEY_PREFIX}function:response:${callId}`
-					const streamKey = `${REDIS_KEY_PREFIX}function_calls:${functionName}:${workflowId}`
-
-					console.log("🌊 CALLFUNCTION: Call ID:", callId)
-					console.log("🌊 CALLFUNCTION: Stream key:", streamKey)
-					console.log("🌊 CALLFUNCTION: Response channel:", responseChannel)
-					logger.log("🌊 CallFunction: Call ID:", callId)
-					logger.log("🌊 CallFunction: Stream key:", streamKey)
-					logger.log("🌊 CallFunction: Response channel:", responseChannel)
-
-					// Use enhanced registry for instant worker availability
-					if (enhancedRegistry instanceof EnhancedFunctionRegistry) {
-						console.log("⚡⚡⚡ CALLFUNCTION: USING ENHANCED REGISTRY WITH INSTANT READINESS")
-						logger.log("⚡ CallFunction: Using instant readiness check (no polling!)")
-
-						try {
-							console.log("⚡⚡⚡ CALLFUNCTION: CALLING callFunctionWithInstantReadiness...")
-							console.log("⚡⚡⚡ CALLFUNCTION: Function name:", functionName)
-							console.log("⚡⚡⚡ CALLFUNCTION: Workflow ID:", workflowId)
-							console.log("⚡⚡⚡ CALLFUNCTION: Parameters:", functionParameters)
-							console.log("⚡⚡⚡ CALLFUNCTION: Timeout: 10000ms")
-
-							// This will return instantly if workers are available, or wait for pub/sub notification
-							const response = await enhancedRegistry.callFunctionWithInstantReadiness(
-								functionName,
-								workflowId,
-								functionParameters,
-								item,
-								10000 // 10 second timeout
-							)
-
-							console.log("⚡⚡⚡ CALLFUNCTION: RECEIVED RESPONSE FROM callFunctionWithInstantReadiness:", response)
-
-							console.log("⚡⚡⚡ CALLFUNCTION: Processing response...")
-							logger.log("⚡ CallFunction: Received instant response:", response)
-
-							// Process the response
-							if (!response.success) {
-								console.log("❌❌❌ CALLFUNCTION: RESPONSE INDICATES FAILURE:", response.error)
-								throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
-							}
-
-							console.log("✅✅✅ CALLFUNCTION: RESPONSE INDICATES SUCCESS")
-
-							// Start with the original item
-							let resultJson: any = { ...item.json }
-
-							// Store response ONLY if requested
-							if (response.data !== null && storeResponse && responseVariableName && responseVariableName.trim()) {
-								// Store under specific variable name
-								resultJson[responseVariableName] = response.data
-							}
-							// If storeResponse is false, don't include the function return value at all
-
-							const resultItem: INodeExecutionData = {
-								json: resultJson,
-								index: itemIndex,
-								binary: item.binary,
-							}
-
-							logger.log("⚡ CallFunction: Created result item =", resultItem)
-							returnData.push(resultItem)
-							continue // Skip the old polling logic
-						} catch (error) {
-							console.log("❌❌❌ CALLFUNCTION: ERROR IN callFunctionWithInstantReadiness:", error)
-							console.log("❌❌❌ CALLFUNCTION: Error message:", error.message)
-							console.log("❌❌❌ CALLFUNCTION: Error stack:", error.stack)
-
-							if (error.message.includes("not ready after")) {
-								console.log("❌❌❌ CALLFUNCTION: TIMEOUT ERROR - Function not ready")
-								// Function didn't become ready in time
-								throw new NodeOperationError(
-									this.getNode(),
-									`Function '${functionName}' not available. This usually means the Function node is not running or the workflow containing the Function node is not active.`
-								)
-							}
-							console.log("❌❌❌ CALLFUNCTION: RETHROWING ERROR")
-							throw error
-						}
-					} else {
-						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry is NOT an instance of EnhancedFunctionRegistry")
-						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry type:", typeof enhancedRegistry)
-						console.log("⚠️⚠️⚠️ CALLFUNCTION: Enhanced registry constructor:", (enhancedRegistry as any)?.constructor?.name)
-					}
-
-					// Fallback to original polling logic if not using enhanced registry
-					logger.log("🔄 CallFunction: Falling back to polling logic")
-					let availableWorkers = await registry.getAvailableWorkers(functionName)
-					let retryCount = 0
-					let maxRetries = 4
-					const retryDelay = 1000
-
-					// If shutdown was detected, extend retry period for restart
-					if (shutdownDetected) {
-						maxRetries = 8 // Double the retries when restart detected
-						logger.log("🔄 CallFunction: ⚡ Shutdown detected - extending retry period for Function node restart")
-					}
-
-					while (availableWorkers.length === 0 && retryCount < maxRetries) {
-						const retryMessage = shutdownDetected ? "Function node restarting after workflow save" : "Function node may take up to 4 seconds to restart"
-
-						logger.log(`🔄 CallFunction: No workers found (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`)
-						logger.log(`🔄 CallFunction: ${retryMessage}`)
-
-						await new Promise((resolve) => setTimeout(resolve, retryDelay))
-						availableWorkers = await registry.getAvailableWorkers(functionName)
-						retryCount++
-					}
-
-					if (availableWorkers.length === 0) {
-						throw new NodeOperationError(
-							this.getNode(),
-							`Function '${functionName}' not found or no workers available after ${maxRetries} retries (${maxRetries} seconds). This usually means the Function node is not running or the workflow containing the Function node is not active.`
-						)
-					}
-
-					// CRITICAL: Clean up stale workers BEFORE health check to prevent accumulation
-					logger.log(`🧹 PREVENTION: Cleaning up stale workers for function ${functionName} before health check`)
-					const cleanedStaleCount = await registry.cleanupStaleWorkers(functionName, 30000) // 30 second timeout
-					if (cleanedStaleCount > 0) {
-						logger.log(`🧹 PREVENTION: Cleaned up ${cleanedStaleCount} stale workers before health check`)
-						// Refresh worker list after cleanup
-						availableWorkers = await registry.getAvailableWorkers(functionName)
-					}
-
-					// Enhanced worker health check with diagnostic logging
-					const healthyWorkers = []
-					const staleWorkers = []
-
-					logger.log(`🔍 PREVENTION: Checking health of ${availableWorkers.length} workers for function ${functionName}`)
-					for (const workerId of availableWorkers) {
-						const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
-						logger.log("🔍 PREVENTION: Worker health check - Worker:", workerId, "Healthy:", isHealthy)
-						if (isHealthy) {
-							healthyWorkers.push(workerId)
-						} else {
-							staleWorkers.push(workerId)
-						}
-					}
-
-					// Log diagnostic information
-					if (staleWorkers.length > 0) {
-						logger.log(`🧹 PREVENTION: Found ${staleWorkers.length} remaining stale workers: [${staleWorkers.join(", ")}]`)
-					}
-					logger.log(`✅ PREVENTION: Found ${healthyWorkers.length} healthy workers: [${healthyWorkers.join(", ")}]`)
-
-					// RECOVERY MECHANISM: If no healthy workers, attempt recovery
-					if (healthyWorkers.length === 0) {
-						logger.warn("🚨 RECOVERY: No healthy workers found, attempting recovery...")
-
-						// Show detailed diagnostics before recovery
-						const diagnostics = await registry.listAllWorkersAndFunctions()
-						const functionWorkers = diagnostics.workers.filter((w: any) => w.functionName === functionName)
-						logger.log(`🚨 RECOVERY: Detailed worker status for function ${functionName}:`)
-						functionWorkers.forEach((w: any) => {
-							logger.log(`🚨 RECOVERY:   - Worker ${w.workerId}: ${w.isHealthy ? "healthy" : "stale"} (last seen: ${w.lastSeen}, age: ${w.age})`)
-						})
-
-						// Clean up stale workers first
-						const cleanedCount = await registry.cleanupStaleWorkers(functionName, 30000) // 30 second timeout
-						logger.log(`🚨 RECOVERY: Cleaned up ${cleanedCount} stale workers`)
-
-						// Check if the function needs recovery
-						const recoveryCheck = await registry.detectMissingConsumer(functionName, targetScope)
-						logger.log(`🚨 RECOVERY: Recovery check result:`, recoveryCheck)
-
-						if (recoveryCheck.needsRecovery) {
-							logger.warn(`🚨 RECOVERY: Function needs recovery - ${recoveryCheck.reason}`)
-
-							// Attempt to recover the function
-							const recoverySuccess = await registry.attemptFunctionRecovery(functionName, targetScope)
-
-							if (recoverySuccess) {
-								logger.log("🚨 RECOVERY: Recovery attempt completed, waiting for function to restart...")
-
-								// Wait a bit for the function to potentially restart
-								await new Promise((resolve) => setTimeout(resolve, 2000))
-
-								// Check again for healthy workers
-								const newAvailableWorkers = await registry.getAvailableWorkers(functionName)
-								const newHealthyWorkers = []
-								for (const workerId of newAvailableWorkers) {
-									const isHealthy = await registry.isWorkerHealthy(workerId, functionName)
-									if (isHealthy) {
-										newHealthyWorkers.push(workerId)
-									}
-								}
-
-								if (newHealthyWorkers.length > 0) {
-									logger.log("🚨 RECOVERY: Recovery successful! Found healthy workers:", newHealthyWorkers.length)
-									healthyWorkers.push(...newHealthyWorkers)
-								} else {
-									logger.error("🚨 RECOVERY: Recovery failed - still no healthy workers")
-									throw new NodeOperationError(
-										this.getNode(),
-										`Function '${functionName}' has no healthy workers available. Recovery attempted but failed. ` +
-											`This usually means the Function node trigger is not running. Try saving the workflow again or ` +
-											`deactivating and reactivating the workflow containing the Function node.`
-									)
-								}
-							} else {
-								logger.error("🚨 RECOVERY: Recovery attempt failed")
-								throw new NodeOperationError(
-									this.getNode(),
-									`Function '${functionName}' has no healthy workers available and recovery failed. ` +
-										`This usually means the Function node trigger is not running. Try saving the workflow again or ` +
-										`deactivating and reactivating the workflow containing the Function node.`
-								)
-							}
-						} else {
-							throw new NodeOperationError(this.getNode(), `Function '${functionName}' has no healthy workers available. ${recoveryCheck.reason}`)
-						}
-					}
-
-					logger.log("🌊 CallFunction: Healthy workers available:", healthyWorkers.length)
-
-					// Check if stream is ready before making the call
-					const groupName = `${REDIS_KEY_PREFIX}function_group:${functionName}:${workflowId}`
-					logger.log("🔍 DIAGNOSTIC: Checking if stream is ready")
-					logger.log("🔍 DIAGNOSTIC: Stream key:", streamKey)
-					logger.log("🔍 DIAGNOSTIC: Group name:", groupName)
-					logger.log("🔍 DIAGNOSTIC: Timeout: 3000ms (increased from 500ms)")
-
-					const startTime = Date.now()
-					const isReady = await registry.waitForStreamReady(streamKey, groupName, 3000) // Increased to 3 seconds
-					const checkDuration = Date.now() - startTime
-
-					logger.log("🔍 DIAGNOSTIC: Stream ready check completed")
-					logger.log("🔍 DIAGNOSTIC: Is ready:", isReady)
-					logger.log("🔍 DIAGNOSTIC: Check duration:", checkDuration, "ms")
-
-					if (!isReady) {
-						logger.warn("🔍 DIAGNOSTIC: Stream not ready after 3000ms - consumer may have issues")
-						logger.warn("🔍 DIAGNOSTIC: Function consumer might still be starting up or not running")
-						// Don't throw error immediately, try the call - it might work if function is just starting
-					} else {
-						logger.log("🔍 DIAGNOSTIC: Stream is ready, proceeding with call")
-					}
-
-					// Add call to stream (no timeout)
-					await registry.addCall(streamKey, callId, functionName, functionParameters, item, responseChannel)
-
-					logger.log("🌊 CallFunction: Call added to stream, waiting for response...")
-					logger.log("🌊 CallFunction: Note: Function MUST use ReturnFromFunction node or this will wait FOREVER")
-
-					// Wait for response with NO timeout - will wait forever until ReturnFromFunction responds
-					const response = await registry.waitForResponse(responseChannel, 0) // 0 = infinite wait
-
-					logger.log("🌊 CallFunction: Received response:", response)
-
-					if (!response.success) {
-						throw new NodeOperationError(this.getNode(), `Function call failed: ${response.error}`)
-					}
-
-					// Start with the original item
-					let resultJson: any = { ...item.json }
-
-					// Store response ONLY if requested
-					if (response.data !== null && storeResponse && responseVariableName && responseVariableName.trim()) {
-						// Store under specific variable name
-						resultJson[responseVariableName] = response.data
-					}
-					// If storeResponse is false, don't include the function return value at all
-
-					const resultItem: INodeExecutionData = {
-						json: resultJson,
-						index: itemIndex,
-						binary: item.binary,
-					}
-
-					logger.log("🌊 CallFunction: Created result item =", resultItem)
-					returnData.push(resultItem)
-				}
+				logger.log("🔧 CallFunction: Created result item =", resultItem)
+				returnData.push(resultItem)
 			} catch (error) {
-				console.log("❌❌❌ CALLFUNCTION: CAUGHT ERROR IN MAIN TRY-CATCH:", error)
-				console.log("❌❌❌ CALLFUNCTION: Error message:", error.message)
-				console.log("❌❌❌ CALLFUNCTION: Error stack:", error.stack)
 				logger.error("🔧 CallFunction: Error calling function:", error)
 
 				// Create an error result item
@@ -941,22 +545,17 @@ export class CallFunction implements INodeType {
 				}
 
 				if (this.continueOnFail()) {
-					console.log("⚠️⚠️⚠️ CALLFUNCTION: Continue on fail enabled, adding error item")
+					logger.log("⚠️ CallFunction: Continue on fail enabled, adding error item")
 					returnData.push(errorItem)
 				} else {
-					console.log("❌❌❌ CALLFUNCTION: Continue on fail disabled, rethrowing error")
+					logger.log("❌ CallFunction: Continue on fail disabled, rethrowing error")
 					throw error
 				}
 			}
 		}
 
-		console.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION COMPLETED =====")
-		console.log("🔥🔥🔥 CALLFUNCTION: CallFunction node execution finished")
-		console.log("🔥🔥🔥 CALLFUNCTION: Timestamp:", new Date().toISOString())
-		console.log("🔥🔥🔥 CALLFUNCTION: Returning", returnData.length, "items")
 		logger.log("🔥🔥🔥 CALLFUNCTION: ===== EXECUTION COMPLETED =====")
-
-		logger.log("� CallFunction: Returning data =", returnData)
+		logger.log("🔧 CallFunction: Returning data =", returnData)
 		return [returnData]
 	}
 }
