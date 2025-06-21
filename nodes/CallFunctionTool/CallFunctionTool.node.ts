@@ -1,3 +1,4 @@
+import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager"
 import { DynamicTool } from "@langchain/core/tools"
 import {
 	NodeConnectionType,
@@ -6,6 +7,7 @@ import {
 	type ISupplyDataFunctions,
 	type SupplyData,
 	type ILoadOptionsFunctions,
+	type INodeExecutionData,
 	NodeOperationError,
 } from "n8n-workflow"
 import { getFunctionRegistry } from "../FunctionRegistryFactory"
@@ -321,9 +323,16 @@ export class CallFunctionTool implements INodeType {
 
 		logger.log("🔧 CallFunctionTool: Final tool description:", finalDescription)
 
-		// Create the tool function
-		const toolFunction = async (input: string | Record<string, any>) => {
-			logger.log("🔧 CallFunctionTool: Tool function called with input:", input)
+		// Get the base context for proper execution tracking
+		const baseContext = this
+
+		// Track run index for multiple executions (like WorkflowToolService does)
+		let runIndex: number = 0
+
+		// Create the tool function with proper execution tracking
+		const toolFunction = async (input: string | Record<string, any>, runManager?: CallbackManagerForToolRun) => {
+			const localRunIndex = runIndex++
+			logger.log("🔧 CallFunctionTool: Tool function called with input:", input, "runIndex:", localRunIndex)
 
 			let parameters: Record<string, any> = {}
 
@@ -336,13 +345,13 @@ export class CallFunctionTool implements INodeType {
 					if (parameterDefinitions.length === 1) {
 						parameters[parameterDefinitions[0].name] = input
 					} else {
-						throw new NodeOperationError(this.getNode(), `Invalid input format. Expected JSON object with parameters: ${parameterDefinitions.map((p) => p.name).join(", ")}`)
+						throw new NodeOperationError(baseContext.getNode(), `Invalid input format. Expected JSON object with parameters: ${parameterDefinitions.map((p) => p.name).join(", ")}`)
 					}
 				}
 			} else if (typeof input === "object" && input !== null) {
 				parameters = input
 			} else {
-				throw new NodeOperationError(this.getNode(), "Invalid input type. Expected string or object.")
+				throw new NodeOperationError(baseContext.getNode(), "Invalid input type. Expected string or object.")
 			}
 
 			logger.log("🔧 CallFunctionTool: Parsed parameters:", parameters)
@@ -350,12 +359,12 @@ export class CallFunctionTool implements INodeType {
 			// Validate required parameters
 			for (const paramDef of parameterDefinitions) {
 				if (paramDef.required && !(paramDef.name in parameters)) {
-					throw new NodeOperationError(this.getNode(), `Missing required parameter: ${paramDef.name}`)
+					throw new NodeOperationError(baseContext.getNode(), `Missing required parameter: ${paramDef.name}`)
 				}
 			}
 
-			// Call the function using FunctionCallService
 			try {
+				// Call the function using FunctionCallService
 				const result = await FunctionCallService.callFunction({
 					functionName,
 					workflowId,
@@ -364,16 +373,49 @@ export class CallFunctionTool implements INodeType {
 				})
 
 				if (!result.success) {
-					throw new NodeOperationError(this.getNode(), result.error || "Function call failed")
+					throw new NodeOperationError(baseContext.getNode(), result.error || "Function call failed")
 				}
 
 				logger.log("🔧 CallFunctionTool: Function call successful, result:", result.data)
+
+				// Prepare response data for logging
+				const responseData: INodeExecutionData[] = [
+					{
+						json: {
+							functionName,
+							workflowId,
+							parameters,
+							result: result.data,
+							success: true,
+						},
+					},
+				]
+
+				// Add output data to register the tool execution in n8n's system (this makes it show up in AI Agent logs!)
+				void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [responseData])
 
 				// Return the result data, or a success message if no data
 				return result.data !== null ? JSON.stringify(result.data) : "Function executed successfully"
 			} catch (error) {
 				logger.error("🔧 CallFunctionTool: Function call failed:", error)
-				throw new NodeOperationError(this.getNode(), `Function call failed: ${error.message}`)
+
+				// Prepare error data for logging
+				const errorData: INodeExecutionData[] = [
+					{
+						json: {
+							functionName,
+							workflowId,
+							parameters,
+							error: error.message,
+							success: false,
+						},
+					},
+				]
+
+				// Add error output data to register the failed execution
+				void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [errorData])
+
+				throw new NodeOperationError(baseContext.getNode(), `Function call failed: ${error.message}`)
 			}
 		}
 
