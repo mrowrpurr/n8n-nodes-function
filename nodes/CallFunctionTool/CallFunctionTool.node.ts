@@ -128,7 +128,8 @@ export class CallFunctionTool implements INodeType {
 		outputNames: ["Tool"],
 		properties: [
 			{
-				displayName: "ℹ️ This tool allows AI agents to call Function nodes. Configure which function to call and how parameters should be handled.",
+				displayName:
+					"ℹ️ This tool allows AI agents to call Function nodes. You can configure each parameter to be provided by the AI agent (required/optional) or set with a fixed value.",
 				name: "notice",
 				type: "notice",
 				default: "",
@@ -204,38 +205,11 @@ export class CallFunctionTool implements INodeType {
 				},
 			},
 			{
-				displayName: "Parameter Schema",
-				name: "parameterSchema",
-				type: "options",
-				options: [
-					{
-						name: "Auto-Detect From Function",
-						value: "auto",
-						description: "Automatically detect parameters from the selected function",
-					},
-					{
-						name: "Custom Schema",
-						value: "custom",
-						description: "Define a custom parameter schema for the AI agent",
-					},
-				],
-				default: "auto",
-				description: "How to define the parameters that the AI agent can pass to the function",
-				displayOptions: {
-					show: {
-						functionName: [{ _cnd: { exists: true } }],
-					},
-					hide: {
-						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
-					},
-				},
-			},
-			{
-				displayName: "Custom Parameters",
-				name: "customParameters",
+				displayName: "Function Parameters",
+				name: "functionParameters",
 				placeholder: "Add parameter",
 				type: "fixedCollection",
-				description: "Define the parameters that the AI agent can pass to the function",
+				description: "Configure how each function parameter should be handled - by AI agent or with fixed values",
 				typeOptions: {
 					multipleValues: true,
 					sortable: true,
@@ -243,7 +217,6 @@ export class CallFunctionTool implements INodeType {
 				default: {},
 				displayOptions: {
 					show: {
-						parameterSchema: ["custom"],
 						functionName: [{ _cnd: { exists: true } }],
 					},
 					hide: {
@@ -256,56 +229,50 @@ export class CallFunctionTool implements INodeType {
 						displayName: "Parameter",
 						values: [
 							{
-								displayName: "Parameter Name",
+								displayName: "Parameter Name or ID",
 								name: "name",
-								type: "string",
+								type: "options",
+								typeOptions: {
+									loadOptionsMethod: "getFunctionParameters",
+									loadOptionsDependsOn: ["workflowId.value", "functionName"],
+								},
 								default: "",
-								description: "Name of the parameter that the AI agent will provide",
+								description:
+									'Select the function parameter to configure. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 								required: true,
 							},
 							{
-								displayName: "Description",
-								name: "description",
-								type: "string",
-								default: "",
-								description: "Description of what this parameter is for (helps the AI agent understand when to use it)",
-								placeholder: "e.g. The amount to calculate tax for",
-							},
-							{
-								displayName: "Type",
-								name: "type",
+								displayName: "Value Provided",
+								name: "valueProvider",
 								type: "options",
 								options: [
 									{
-										name: "Array",
-										value: "array",
+										name: "By Model (and Is Required)",
+										value: "modelRequired",
 									},
 									{
-										name: "Boolean",
-										value: "boolean",
+										name: "By Model (but Is Optional)",
+										value: "modelOptional",
 									},
 									{
-										name: "Number",
-										value: "number",
-									},
-									{
-										name: "Object",
-										value: "object",
-									},
-									{
-										name: "String",
-										value: "string",
+										name: "Using Field Below",
+										value: "fieldValue",
 									},
 								],
-								default: "string",
-								description: "The type of data this parameter expects",
+								default: "modelRequired",
+								description: "How this parameter value should be provided",
 							},
 							{
-								displayName: "Required",
-								name: "required",
-								type: "boolean",
-								default: true,
-								description: "Whether this parameter is required for the function to work",
+								displayName: "Value",
+								name: "value",
+								type: "string",
+								default: "",
+								description: "Fixed value for this parameter",
+								displayOptions: {
+									show: {
+										valueProvider: ["fieldValue"],
+									},
+								},
 							},
 						],
 					},
@@ -365,6 +332,65 @@ export class CallFunctionTool implements INodeType {
 				logger.log("🔧 CallFunctionTool: Available functions:", availableFunctions)
 				return availableFunctions
 			},
+			async getFunctionParameters(this: ILoadOptionsFunctions) {
+				const functionName = this.getCurrentNodeParameter("functionName") as string
+				const workflowSelector = this.getCurrentNodeParameter("workflowId") as any
+
+				logger.log("🔧 CallFunctionTool: Loading parameters for function:", functionName)
+
+				// Extract the actual workflow ID from the selector object
+				let workflowId: string = ""
+				if (workflowSelector && typeof workflowSelector === "object" && workflowSelector.value) {
+					workflowId = workflowSelector.value
+				} else if (typeof workflowSelector === "string") {
+					workflowId = workflowSelector
+				}
+
+				if (!functionName || functionName === "__no_functions__" || functionName === "__no_workflow_selected__" || functionName === "__activate_workflow__") {
+					return []
+				}
+
+				if (!workflowId) {
+					return []
+				}
+
+				const registry = await getFunctionRegistry()
+				const parameters = await registry.getFunctionParameters(functionName, workflowId)
+
+				logger.log("🔧 CallFunctionTool: Found parameters:", parameters)
+
+				// Get currently configured parameters to filter out already selected ones
+				const currentParameters = this.getCurrentNodeParameter("functionParameters") as any
+				const selectedParameterNames = new Set<string>()
+
+				if (currentParameters && currentParameters.parameter) {
+					for (const param of currentParameters.parameter) {
+						if (param.name) {
+							selectedParameterNames.add(param.name)
+						}
+					}
+				}
+
+				// Filter out already-selected parameters
+				const availableParameters = parameters.filter((param) => !selectedParameterNames.has(param.name))
+
+				// If no parameters are available, return a descriptive message
+				if (availableParameters.length === 0) {
+					return [
+						{
+							name: "All Parameters Have Been Configured",
+							value: "__no_params_available__",
+							description: "All function parameters are already configured",
+						},
+					]
+				}
+
+				return availableParameters.map((param) => ({
+					name: `${param.name} (${param.type})${param.required ? " *" : ""}`,
+					value: param.name,
+					description: param.description || `${param.type} parameter${param.required ? " (required)" : ""}`,
+				}))
+			},
 		},
 	}
 
@@ -375,7 +401,6 @@ export class CallFunctionTool implements INodeType {
 		const customFunctionDescription = this.getNodeParameter("customFunctionDescription", 0, "") as string
 		const workflowSelector = this.getNodeParameter("workflowId", 0) as any
 		const functionName = this.getNodeParameter("functionName", 0) as string
-		const parameterSchema = this.getNodeParameter("parameterSchema", 0, "auto") as string
 
 		// Extract the actual workflow ID from the selector object
 		let workflowId: string = ""
@@ -387,7 +412,6 @@ export class CallFunctionTool implements INodeType {
 
 		logger.log("🔧 CallFunctionTool: Creating tool for function:", functionName)
 		logger.log("🔧 CallFunctionTool: Workflow ID:", workflowId)
-		logger.log("🔧 CallFunctionTool: Parameter schema mode:", parameterSchema)
 
 		if (!workflowId) {
 			throw new NodeOperationError(this.getNode(), "Please select a workflow first.")
@@ -435,48 +459,106 @@ export class CallFunctionTool implements INodeType {
 			usingCustomDescription: setCustomFunctionDescription && customFunctionDescription,
 		})
 
-		// Get parameter definitions
-		let parameterDefinitions: Array<{ name: string; description?: string; type: string; required: boolean }> = []
-
-		if (parameterSchema === "auto") {
-			// Auto-detect parameters from the function
-			try {
-				const functionParams = await registry.getFunctionParameters(functionName, workflowId)
-				parameterDefinitions = functionParams.map((param: any) => ({
-					name: param.name,
-					description: param.description || `${param.type} parameter`,
-					type: param.type || "string",
-					required: param.required || false,
-				}))
-				logger.log("🔧 CallFunctionTool: Auto-detected parameters:", parameterDefinitions)
-			} catch (error) {
-				logger.warn("🔧 CallFunctionTool: Failed to auto-detect parameters:", error)
-				parameterDefinitions = []
-			}
-		} else {
-			// Use custom parameter definitions
-			const customParameters = this.getNodeParameter("customParameters", 0, {}) as any
-			const parameterList = customParameters.parameter || []
-			parameterDefinitions = parameterList.map((param: any) => ({
+		// Get all function parameters from registry
+		let allFunctionParams: Array<{ name: string; description?: string; type: string; required: boolean }> = []
+		try {
+			const functionParams = await registry.getFunctionParameters(functionName, workflowId)
+			allFunctionParams = functionParams.map((param: any) => ({
 				name: param.name,
 				description: param.description || `${param.type} parameter`,
 				type: param.type || "string",
-				required: param.required !== false,
+				required: param.required || false,
 			}))
-			logger.log("🔧 CallFunctionTool: Custom parameters:", parameterDefinitions)
+			logger.log("🔧 CallFunctionTool: All function parameters:", allFunctionParams)
+		} catch (error) {
+			logger.warn("🔧 CallFunctionTool: Failed to get function parameters:", error)
+			allFunctionParams = []
 		}
+
+		// Get configured parameter settings
+		const functionParameters = this.getNodeParameter("functionParameters", 0, {}) as any
+		const parameterList = functionParameters.parameter || []
+
+		// Parse parameter configurations
+		const parameterConfigs = new Map<string, { valueProvider: string; value?: string; paramDef: any }>()
+		const hardCodedValues = new Map<string, any>()
+		const aiParameters: Array<{ name: string; description?: string; type: string; required: boolean }> = []
+
+		// Process configured parameters
+		for (const paramConfig of parameterList) {
+			const paramName = paramConfig.name
+			const valueProvider = paramConfig.valueProvider
+			const value = paramConfig.value
+
+			// Skip special placeholder values
+			if (paramName === "__no_params_available__") {
+				continue
+			}
+
+			// Find the parameter definition
+			const paramDef = allFunctionParams.find((p) => p.name === paramName)
+			if (!paramDef) {
+				logger.warn(`🔧 CallFunctionTool: Parameter ${paramName} not found in function definition`)
+				continue
+			}
+
+			parameterConfigs.set(paramName, { valueProvider, value, paramDef })
+
+			if (valueProvider === "fieldValue") {
+				// Hard-coded value - parse it appropriately
+				let parsedValue: any = value
+				try {
+					// Try to parse as JSON first
+					parsedValue = JSON.parse(value)
+				} catch {
+					// If not JSON, use as string
+					parsedValue = value
+				}
+				hardCodedValues.set(paramName, parsedValue)
+				logger.log(`🔧 CallFunctionTool: Hard-coded parameter ${paramName} = ${parsedValue}`)
+			} else {
+				// AI-provided parameter
+				const isRequired = valueProvider === "modelRequired"
+				aiParameters.push({
+					name: paramDef.name,
+					description: paramDef.description,
+					type: paramDef.type,
+					required: isRequired,
+				})
+				logger.log(`🔧 CallFunctionTool: AI parameter ${paramName} (${isRequired ? "required" : "optional"})`)
+			}
+		}
+
+		// Add any unconfigured parameters as AI-required by default
+		for (const param of allFunctionParams) {
+			if (!parameterConfigs.has(param.name)) {
+				aiParameters.push({
+					name: param.name,
+					description: param.description,
+					type: param.type,
+					required: param.required,
+				})
+				logger.log(`🔧 CallFunctionTool: Unconfigured parameter ${param.name} added as AI-required`)
+			}
+		}
+
+		logger.log("🔧 CallFunctionTool: Parameter configuration summary:", {
+			totalParameters: allFunctionParams.length,
+			hardCodedParameters: Array.from(hardCodedValues.keys()),
+			aiParameters: aiParameters.map((p) => `${p.name}(${p.required ? "required" : "optional"})`),
+		})
 
 		// Build the tool description
 		let finalDescription = finalFunctionDescription
 
-		if (parameterDefinitions.length > 0) {
+		if (aiParameters.length > 0) {
 			const getParametersDescription = (parameters: any[]) =>
 				parameters.map((p) => `${p.name}: (description: ${p.description || ""}, type: ${p.type || "string"}, required: ${!!p.required})`).join(",\n ")
 
 			finalDescription += `
-	Tool expects valid stringified JSON object with ${parameterDefinitions.length} properties.
+	Tool expects valid stringified JSON object with ${aiParameters.length} properties.
 	Property names with description, type and required status:
-	${getParametersDescription(parameterDefinitions)}
+	${getParametersDescription(aiParameters)}
 	ALL parameters marked as required must be provided`
 		}
 
@@ -487,12 +569,13 @@ export class CallFunctionTool implements INodeType {
 			actualFunctionName: actualFunctionName,
 			finalFunctionName: finalFunctionName,
 			workflowId,
-			schemaMode: parameterSchema,
-			parameterDefinitions,
+			totalFunctionParameters: allFunctionParams.length,
+			aiParameters,
+			hardCodedParameters: Array.from(hardCodedValues.entries()),
 			finalDescription,
-			parameterCount: parameterDefinitions.length,
-			requiredParameters: parameterDefinitions.filter((p) => p.required).map((p) => p.name),
-			optionalParameters: parameterDefinitions.filter((p) => !p.required).map((p) => p.name),
+			aiParameterCount: aiParameters.length,
+			requiredAiParameters: aiParameters.filter((p) => p.required).map((p) => p.name),
+			optionalAiParameters: aiParameters.filter((p) => !p.required).map((p) => p.name),
 			customOverrides: {
 				name: setCustomFunctionName && customFunctionName,
 				description: setCustomFunctionDescription && customFunctionDescription,
@@ -512,42 +595,50 @@ export class CallFunctionTool implements INodeType {
 			const localRunIndex = runIndex++
 			logger.log("🔧 CallFunctionTool: Tool function called with input:", input, "runIndex:", localRunIndex)
 
-			let parameters: Record<string, any> = {}
+			let aiProvidedParameters: Record<string, any> = {}
 
 			// Parse input - it could be a JSON string or an object
 			if (typeof input === "string") {
 				try {
-					parameters = JSON.parse(input)
+					aiProvidedParameters = JSON.parse(input)
 				} catch (error) {
 					// If it's not JSON, treat it as a single parameter
-					if (parameterDefinitions.length === 1) {
-						parameters[parameterDefinitions[0].name] = input
+					if (aiParameters.length === 1) {
+						aiProvidedParameters[aiParameters[0].name] = input
 					} else {
-						throw new NodeOperationError(baseContext.getNode(), `Invalid input format. Expected JSON object with parameters: ${parameterDefinitions.map((p) => p.name).join(", ")}`)
+						throw new NodeOperationError(baseContext.getNode(), `Invalid input format. Expected JSON object with parameters: ${aiParameters.map((p) => p.name).join(", ")}`)
 					}
 				}
 			} else if (typeof input === "object" && input !== null) {
-				parameters = input
+				aiProvidedParameters = input
 			} else {
 				throw new NodeOperationError(baseContext.getNode(), "Invalid input type. Expected string or object.")
 			}
 
-			logger.log("🔧 CallFunctionTool: Parsed parameters:", parameters)
+			logger.log("🔧 CallFunctionTool: AI-provided parameters:", aiProvidedParameters)
 
-			// Validate required parameters
-			for (const paramDef of parameterDefinitions) {
-				if (paramDef.required && !(paramDef.name in parameters)) {
+			// Validate required AI parameters
+			for (const paramDef of aiParameters) {
+				if (paramDef.required && !(paramDef.name in aiProvidedParameters)) {
 					throw new NodeOperationError(baseContext.getNode(), `Missing required parameter: ${paramDef.name}`)
 				}
 			}
+
+			// Merge hard-coded values with AI-provided values
+			const finalParameters: Record<string, any> = {
+				...Object.fromEntries(hardCodedValues),
+				...aiProvidedParameters,
+			}
+
+			logger.log("🔧 CallFunctionTool: Final merged parameters:", finalParameters)
 
 			try {
 				// Call the function using FunctionCallService
 				const result = await FunctionCallService.callFunction({
 					functionName,
 					workflowId,
-					parameters,
-					inputData: { json: parameters }, // Provide the parameters as input data
+					parameters: finalParameters,
+					inputData: { json: finalParameters }, // Provide the parameters as input data
 				})
 
 				if (!result.success) {
@@ -562,7 +653,9 @@ export class CallFunctionTool implements INodeType {
 						json: {
 							functionName,
 							workflowId,
-							parameters,
+							aiProvidedParameters,
+							hardCodedParameters: Object.fromEntries(hardCodedValues),
+							finalParameters,
 							result: result.data,
 							success: true,
 						},
@@ -583,7 +676,9 @@ export class CallFunctionTool implements INodeType {
 						json: {
 							functionName,
 							workflowId,
-							parameters,
+							aiProvidedParameters,
+							hardCodedParameters: Object.fromEntries(hardCodedValues),
+							finalParameters,
 							error: error.message,
 							success: false,
 						},
