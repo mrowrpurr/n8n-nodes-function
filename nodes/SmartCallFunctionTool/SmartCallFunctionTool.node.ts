@@ -205,6 +205,33 @@ export class SmartCallFunctionTool implements INodeType {
 				},
 			},
 			{
+				displayName: "Parameter Configuration",
+				name: "parameterMode",
+				type: "options",
+				options: [
+					{
+						name: "Let the Model Decide",
+						value: "auto",
+						description: "AI agent can provide all function parameters (uses function's original required/optional settings)",
+					},
+					{
+						name: "Configure Individually",
+						value: "manual",
+						description: "Manually configure each parameter - set some as AI-provided (required/optional) or hard-coded values",
+					},
+				],
+				default: "auto",
+				description: "How to handle function parameters",
+				displayOptions: {
+					show: {
+						functionName: [{ _cnd: { exists: true } }],
+					},
+					hide: {
+						functionName: ["", "__no_workflow_selected__", "__no_functions__", "__activate_workflow__"],
+					},
+				},
+			},
+			{
 				displayName: "Function Parameters",
 				name: "functionParameters",
 				placeholder: "Add parameter",
@@ -217,6 +244,7 @@ export class SmartCallFunctionTool implements INodeType {
 				default: {},
 				displayOptions: {
 					show: {
+						parameterMode: ["manual"],
 						functionName: [{ _cnd: { exists: true } }],
 					},
 					hide: {
@@ -401,6 +429,7 @@ export class SmartCallFunctionTool implements INodeType {
 		const customFunctionDescription = this.getNodeParameter("customFunctionDescription", 0, "") as string
 		const workflowSelector = this.getNodeParameter("workflowId", 0) as any
 		const functionName = this.getNodeParameter("functionName", 0) as string
+		const parameterMode = this.getNodeParameter("parameterMode", 0, "auto") as string
 
 		// Extract the actual workflow ID from the selector object
 		let workflowId: string = ""
@@ -412,6 +441,7 @@ export class SmartCallFunctionTool implements INodeType {
 
 		logger.log("🔧 SmartCallFunctionTool: Creating tool for function:", functionName)
 		logger.log("🔧 SmartCallFunctionTool: Workflow ID:", workflowId)
+		logger.log("🔧 SmartCallFunctionTool: Parameter mode:", parameterMode)
 
 		if (!workflowId) {
 			throw new NodeOperationError(this.getNode(), "Please select a workflow first.")
@@ -475,70 +505,89 @@ export class SmartCallFunctionTool implements INodeType {
 			allFunctionParams = []
 		}
 
-		// Get configured parameter settings
-		const functionParameters = this.getNodeParameter("functionParameters", 0, {}) as any
-		const parameterList = functionParameters.parameter || []
-
-		// Parse parameter configurations
-		const parameterConfigs = new Map<string, { valueProvider: string; value?: string; paramDef: any }>()
+		// Initialize parameter processing variables
 		const hardCodedValues = new Map<string, any>()
 		const aiParameters: Array<{ name: string; description?: string; type: string; required: boolean }> = []
 
-		// Process configured parameters
-		for (const paramConfig of parameterList) {
-			const paramName = paramConfig.name
-			const valueProvider = paramConfig.valueProvider
-			const value = paramConfig.value
-
-			// Skip special placeholder values
-			if (paramName === "__no_params_available__") {
-				continue
-			}
-
-			// Find the parameter definition
-			const paramDef = allFunctionParams.find((p) => p.name === paramName)
-			if (!paramDef) {
-				logger.warn(`🔧 CallFunctionTool: Parameter ${paramName} not found in function definition`)
-				continue
-			}
-
-			parameterConfigs.set(paramName, { valueProvider, value, paramDef })
-
-			if (valueProvider === "fieldValue") {
-				// Hard-coded value - parse it appropriately
-				let parsedValue: any = value
-				try {
-					// Try to parse as JSON first
-					parsedValue = JSON.parse(value)
-				} catch {
-					// If not JSON, use as string
-					parsedValue = value
-				}
-				hardCodedValues.set(paramName, parsedValue)
-				logger.log(`🔧 CallFunctionTool: Hard-coded parameter ${paramName} = ${parsedValue}`)
-			} else {
-				// AI-provided parameter
-				const isRequired = valueProvider === "modelRequired"
-				aiParameters.push({
-					name: paramDef.name,
-					description: paramDef.description,
-					type: paramDef.type,
-					required: isRequired,
-				})
-				logger.log(`🔧 CallFunctionTool: AI parameter ${paramName} (${isRequired ? "required" : "optional"})`)
-			}
-		}
-
-		// Add any unconfigured parameters as AI-required by default
-		for (const param of allFunctionParams) {
-			if (!parameterConfigs.has(param.name)) {
+		if (parameterMode === "auto") {
+			// Auto mode: All function parameters are AI-provided with original required/optional settings
+			logger.log("🔧 SmartCallFunctionTool: Using auto mode - all parameters AI-provided")
+			for (const param of allFunctionParams) {
 				aiParameters.push({
 					name: param.name,
 					description: param.description,
 					type: param.type,
 					required: param.required,
 				})
-				logger.log(`🔧 CallFunctionTool: Unconfigured parameter ${param.name} added as AI-required`)
+				logger.log(`🔧 CallFunctionTool: Auto parameter ${param.name} (${param.required ? "required" : "optional"})`)
+			}
+		} else {
+			// Manual mode: Use valueProvider configuration
+			logger.log("🔧 SmartCallFunctionTool: Using manual mode - valueProvider configuration")
+
+			// Get configured parameter settings
+			const functionParameters = this.getNodeParameter("functionParameters", 0, {}) as any
+			const parameterList = functionParameters.parameter || []
+
+			// Parse parameter configurations
+			const parameterConfigs = new Map<string, { valueProvider: string; value?: string; paramDef: any }>()
+
+			// Process configured parameters
+			for (const paramConfig of parameterList) {
+				const paramName = paramConfig.name
+				const valueProvider = paramConfig.valueProvider
+				const value = paramConfig.value
+
+				// Skip special placeholder values
+				if (paramName === "__no_params_available__") {
+					continue
+				}
+
+				// Find the parameter definition
+				const paramDef = allFunctionParams.find((p) => p.name === paramName)
+				if (!paramDef) {
+					logger.warn(`🔧 CallFunctionTool: Parameter ${paramName} not found in function definition`)
+					continue
+				}
+
+				parameterConfigs.set(paramName, { valueProvider, value, paramDef })
+
+				if (valueProvider === "fieldValue") {
+					// Hard-coded value - parse it appropriately
+					let parsedValue: any = value
+					try {
+						// Try to parse as JSON first
+						parsedValue = JSON.parse(value)
+					} catch {
+						// If not JSON, use as string
+						parsedValue = value
+					}
+					hardCodedValues.set(paramName, parsedValue)
+					logger.log(`🔧 CallFunctionTool: Hard-coded parameter ${paramName} = ${parsedValue}`)
+				} else {
+					// AI-provided parameter
+					const isRequired = valueProvider === "modelRequired"
+					aiParameters.push({
+						name: paramDef.name,
+						description: paramDef.description,
+						type: paramDef.type,
+						required: isRequired,
+					})
+					logger.log(`🔧 CallFunctionTool: AI parameter ${paramName} (${isRequired ? "required" : "optional"})`)
+				}
+			}
+
+			// Add any unconfigured parameters as AI-required by default
+			for (const param of allFunctionParams) {
+				if (!parameterConfigs.has(param.name)) {
+					aiParameters.push({
+						name: param.name,
+						description: param.description,
+						type: param.type,
+						required: param.required,
+					})
+					logger.log(`🔧 CallFunctionTool: Unconfigured parameter ${param.name} added as AI-required`)
+				}
 			}
 		}
 
