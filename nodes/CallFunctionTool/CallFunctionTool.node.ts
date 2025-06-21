@@ -1,5 +1,6 @@
 import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager"
 import { DynamicTool } from "@langchain/core/tools"
+import type { Tool } from "@langchain/core/tools"
 import {
 	NodeConnectionType,
 	type INodeType,
@@ -8,11 +9,97 @@ import {
 	type SupplyData,
 	type ILoadOptionsFunctions,
 	type INodeExecutionData,
+	type IDataObject,
 	NodeOperationError,
 } from "n8n-workflow"
 import { getFunctionRegistry } from "../FunctionRegistryFactory"
 import { functionRegistryLogger as logger } from "../Logger"
 import { FunctionCallService } from "../services/FunctionCallService"
+
+// Helper functions from logWrapper
+function isToolsInstance(instance: unknown): instance is Tool {
+	return typeof instance === "object" && instance !== null && "_call" in instance && typeof (instance as any)._call === "function"
+}
+
+async function callMethodAsync<T>(
+	this: T,
+	parameters: {
+		executeFunctions: ISupplyDataFunctions
+		connectionType: NodeConnectionType
+		currentNodeRunIndex: number
+		method: (...args: any[]) => Promise<unknown>
+		arguments: unknown[]
+	}
+): Promise<unknown> {
+	try {
+		return await parameters.method.call(this, ...parameters.arguments)
+	} catch (e) {
+		const connectedNode = parameters.executeFunctions.getNode()
+
+		const error = new NodeOperationError(connectedNode, e, {
+			functionality: "configuration-node",
+		})
+
+		parameters.executeFunctions.addOutputData(parameters.connectionType, parameters.currentNodeRunIndex, error)
+
+		if (error.message) {
+			if (!error.description) {
+				error.description = error.message
+			}
+			throw error
+		}
+
+		throw new NodeOperationError(connectedNode, `Error on node "${connectedNode.name}" which is connected via input "${parameters.connectionType}"`, {
+			functionality: "configuration-node",
+		})
+	}
+}
+
+function logAiEvent(executeFunctions: ISupplyDataFunctions, eventName: string, data?: IDataObject) {
+	// Simplified version - just log for now
+	logger.log(`🤖 AI Event: ${eventName}`, data)
+}
+
+// Simplified logWrapper that only handles Tool case (exact copy from logWrapper.ts lines 405-436)
+function toolLogWrapper<T extends Tool>(originalInstance: T, executeFunctions: ISupplyDataFunctions): T {
+	return new Proxy(originalInstance, {
+		get: (target, prop) => {
+			// ========== Tool ==========
+			if (isToolsInstance(originalInstance)) {
+				if (prop === "_call" && "_call" in target) {
+					return async (query: string): Promise<string> => {
+						const connectionType = NodeConnectionType.AiTool
+						const inputData: IDataObject = { query }
+
+						if (target.metadata?.isFromToolkit) {
+							inputData.tool = {
+								name: target.name,
+								description: target.description,
+							}
+						}
+						const { index } = executeFunctions.addInputData(connectionType, [[{ json: inputData }]])
+
+						const response = (await callMethodAsync.call(target, {
+							executeFunctions,
+							connectionType,
+							currentNodeRunIndex: index,
+							method: target[prop],
+							arguments: [query],
+						})) as string
+
+						logAiEvent(executeFunctions, "ai-tool-called", { ...inputData, response })
+						executeFunctions.addOutputData(connectionType, index, [[{ json: { response } }]])
+
+						if (typeof response === "string") return response
+						return JSON.stringify(response)
+					}
+				}
+			}
+
+			return (target as any)[prop]
+		},
+	})
+}
 
 export class CallFunctionTool implements INodeType {
 	description: INodeTypeDescription = {
@@ -428,8 +515,11 @@ export class CallFunctionTool implements INodeType {
 
 		logger.log("🔧 CallFunctionTool: Tool created successfully")
 
+		// Apply the log wrapper to make the tool visible in AI Agent logs
+		const wrappedTool = toolLogWrapper(tool, this)
+
 		return {
-			response: tool,
+			response: wrappedTool,
 		}
 	}
 }
