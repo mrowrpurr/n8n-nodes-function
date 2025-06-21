@@ -470,11 +470,14 @@ export class CallFunctionTool implements INodeType {
 		let finalDescription = finalFunctionDescription
 
 		if (parameterDefinitions.length > 0) {
-			finalDescription += "\n\nParameters:"
-			parameterDefinitions.forEach((param) => {
-				const requiredText = param.required ? " (required)" : " (optional)"
-				finalDescription += `\n- ${param.name} (${param.type})${requiredText}: ${param.description || "No description"}`
-			})
+			const getParametersDescription = (parameters: any[]) =>
+				parameters.map((p) => `${p.name}: (description: ${p.description || ""}, type: ${p.type || "string"}, required: ${!!p.required})`).join(",\n ")
+
+			finalDescription += `
+	Tool expects valid stringified JSON object with ${parameterDefinitions.length} properties.
+	Property names with description, type and required status:
+	${getParametersDescription(parameterDefinitions)}
+	ALL parameters marked as required must be provided`
 		}
 
 		// Log the complete tool schema that the AI agent will see
