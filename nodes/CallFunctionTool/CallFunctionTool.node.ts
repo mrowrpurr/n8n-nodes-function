@@ -408,6 +408,19 @@ export class CallFunctionTool implements INodeType {
 			})
 		}
 
+		// Log the complete tool schema that the AI agent will see
+		logger.log("🔧 CallFunctionTool: Complete tool schema for AI agent:", {
+			toolName: this.getNode().name.replace(/ /g, "_"),
+			functionName,
+			workflowId,
+			schemaMode: parameterSchema,
+			parameterDefinitions,
+			finalDescription,
+			parameterCount: parameterDefinitions.length,
+			requiredParameters: parameterDefinitions.filter((p) => p.required).map((p) => p.name),
+			optionalParameters: parameterDefinitions.filter((p) => !p.required).map((p) => p.name),
+		})
+
 		logger.log("🔧 CallFunctionTool: Final tool description:", finalDescription)
 
 		// Get the base context for proper execution tracking
