@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-function",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"description": "Function nodes for n8n",
 	"keywords": [
 		"n8n-community-node-package"
@@ -36,6 +36,7 @@
 			"dist/nodes/Function/Function.node.js",
 			"dist/nodes/CallFunction/CallFunction.node.js",
 			"dist/nodes/CallFunctionTool/CallFunctionTool.node.js",
+			"dist/nodes/InvokeFunction/InvokeFunction.node.js",
 			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js",
 			"dist/nodes/TestTrigger/TestTrigger.node.js"
 		]
