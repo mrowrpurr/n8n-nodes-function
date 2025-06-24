@@ -607,6 +607,9 @@ export class ToolSmartCallFunction implements INodeType {
 	Property names with description, type and required status:
 	${getParametersDescription(aiParameters)}
 	ALL parameters marked as required must be provided`
+		} else {
+			finalDescription += `
+	This function requires no parameters. Call it without any arguments.`
 		}
 
 		// Log the complete tool schema that the AI agent will see
@@ -644,8 +647,12 @@ export class ToolSmartCallFunction implements INodeType {
 
 			let aiProvidedParameters: Record<string, any> = {}
 
-			// Parse input - it could be a JSON string or an object
-			if (typeof input === "string") {
+			// Parse input - handle zero parameters, single parameter, or multiple parameters
+			if (aiParameters.length === 0) {
+				// Zero parameters: ignore any input and use empty object
+				aiProvidedParameters = {}
+				logger.log("🔧 ToolSmartCallFunction: Zero parameters expected, ignoring input")
+			} else if (typeof input === "string") {
 				try {
 					aiProvidedParameters = JSON.parse(input)
 				} catch (error) {
