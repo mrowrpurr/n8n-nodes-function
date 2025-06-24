@@ -35,7 +35,7 @@
 		"nodes": [
 			"dist/nodes/Function/Function.node.js",
 			"dist/nodes/CallFunction/CallFunction.node.js",
-			"dist/nodes/SmartCallFunctionTool/SmartCallFunctionTool.node.js",
+			"dist/nodes/ToolSmartCallFunction/ToolSmartCallFunction.node.js",
 			"dist/nodes/ReturnFromFunction/ReturnFromFunction.node.js"
 		]
 	},

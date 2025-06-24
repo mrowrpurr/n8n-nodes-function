@@ -92,7 +92,7 @@ export class ConsumerLifecycleManager {
 				logger.log("🔄 LIFECYCLE: Subscribing to wake-up notifications for instant responsiveness")
 				const wakeUpListener: NotificationListener = (message: any) => {
 					if (message.type === "function-call" && message.functionName === this.config.functionName) {
-						console.log(`📢📢📢 CONSUMER: WAKE-UP NOTIFICATION received for ${this.config.functionName}!`)
+						// console.log(`📢📢📢 CONSUMER: WAKE-UP NOTIFICATION received for ${this.config.functionName}!`)
 						logger.log(`📢🔄 LIFECYCLE: Wake-up notification received for function call ${message.callId}`)
 						this.wakeUpReceived = true
 						// Instantly interrupt blocking call
@@ -373,7 +373,7 @@ export class ConsumerLifecycleManager {
 			// Check if we received a wake-up notification - if so, use non-blocking read
 			const useNonBlocking = this.wakeUpReceived
 			if (useNonBlocking) {
-				console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
+				// console.log(`📢📢📢 CONSUMER: Wake-up detected! Using non-blocking read for instant response`)
 				logger.log("📢🔄 LIFECYCLE: Wake-up detected - checking for messages immediately")
 				this.wakeUpReceived = false // Reset flag AFTER logging
 			}
@@ -405,14 +405,14 @@ export class ConsumerLifecycleManager {
 					if (!result || result.length === 0) {
 						attempts++
 						if (attempts < maxAttempts) {
-							console.log(`📢📢📢 CONSUMER: No messages found on attempt ${attempts}, retrying in 10ms...`)
+							// console.log(`📢📢📢 CONSUMER: No messages found on attempt ${attempts}, retrying in 10ms...`)
 							await this.sleepMs(10) // Small delay to handle race conditions
 						}
 					}
 				}
 
 				if (!result || result.length === 0) {
-					console.log(`📢📢📢 CONSUMER: No messages found after ${maxAttempts} attempts - may have been processed by another consumer`)
+					// console.log(`📢📢📢 CONSUMER: No messages found after ${maxAttempts} attempts - may have been processed by another consumer`)
 					logger.log("📢🔄 LIFECYCLE: No messages found after wake-up retries - continuing normal processing")
 				}
 			} else {
@@ -445,12 +445,12 @@ export class ConsumerLifecycleManager {
 				this.wakeUpResolver = null
 
 				if (raceResult === "wake-up") {
-					console.log(`📢📢📢 CONSUMER: Promise.race() interrupted by WAKE-UP notification!`)
+					// console.log(`📢📢📢 CONSUMER: Promise.race() interrupted by WAKE-UP notification!`)
 					logger.log("📢🔄 LIFECYCLE: Blocking call interrupted by wake-up - will check for messages")
 
 					// CRITICAL FIX: First check for pending messages that might have been assigned to this consumer
 					// This fixes the race condition where wake-up notification arrives but message is in pending state
-					console.log(`🔍🔍🔍 CONSUMER: Checking for pending messages after wake-up for consumer: ${this.consumerId}`)
+					// console.log(`🔍🔍🔍 CONSUMER: Checking for pending messages after wake-up for consumer: ${this.consumerId}`)
 					logger.log("🔍🔄 LIFECYCLE: Checking pending messages after wake-up to fix race condition")
 
 					const pendingMessages = await this.client.xPendingRange(this.config.streamKey, this.config.groupName, "-", "+", 10)
@@ -459,7 +459,7 @@ export class ConsumerLifecycleManager {
 					const myPendingMessages = pendingMessages.filter((msg) => msg.consumer === this.consumerId)
 
 					if (myPendingMessages && myPendingMessages.length > 0) {
-						console.log(`🎯🎯🎯 CONSUMER: FOUND ${myPendingMessages.length} pending messages assigned to this consumer after wake-up! This was the bug!`)
+						// console.log(`🎯🎯🎯 CONSUMER: FOUND ${myPendingMessages.length} pending messages assigned to this consumer after wake-up! This was the bug!`)
 						logger.log(`🎯🔄 LIFECYCLE: Found ${myPendingMessages.length} pending messages for this consumer after wake-up - claiming them`)
 
 						// Claim the first pending message assigned to this consumer
@@ -473,16 +473,16 @@ export class ConsumerLifecycleManager {
 						)
 
 						if (claimed && claimed.length > 0) {
-							console.log(`✅✅✅ CONSUMER: Successfully claimed pending message ${messageId} after wake-up`)
+							// console.log(`✅✅✅ CONSUMER: Successfully claimed pending message ${messageId} after wake-up`)
 							logger.log(`✅🔄 LIFECYCLE: Successfully claimed pending message ${messageId}`)
 							result = [{ name: this.config.streamKey, messages: claimed }]
 						} else {
-							console.log(`❌❌❌ CONSUMER: Failed to claim pending message ${messageId}`)
+							// console.log(`❌❌❌ CONSUMER: Failed to claim pending message ${messageId}`)
 							logger.log(`❌🔄 LIFECYCLE: Failed to claim pending message ${messageId}`)
 							result = null
 						}
 					} else {
-						console.log(`🔍🔍🔍 CONSUMER: No pending messages found after wake-up, checking for new messages`)
+						// console.log(`🔍🔍🔍 CONSUMER: No pending messages found after wake-up, checking for new messages`)
 						logger.log("🔍🔄 LIFECYCLE: No pending messages after wake-up, checking for new messages")
 
 						// No pending messages, check for new ones with original logic
@@ -521,11 +521,11 @@ export class ConsumerLifecycleManager {
 			}
 
 			// Only log when we actually receive messages
-			console.log(`🚀🚀🚀 CONSUMER: Received ${result.length} streams with messages`)
+			// console.log(`🚀🚀🚀 CONSUMER: Received ${result.length} streams with messages`)
 
 			// Process each message
 			for (const stream of result) {
-				console.log(`🚀🚀🚀 CONSUMER: Processing stream with ${stream.messages.length} messages`)
+				// console.log(`🚀🚀🚀 CONSUMER: Processing stream with ${stream.messages.length} messages`)
 				for (const message of stream.messages) {
 					if (!this.isRunning) {
 						logger.log("🔄 LIFECYCLE: Consumer stopping, leaving message for next consumer")
@@ -533,14 +533,14 @@ export class ConsumerLifecycleManager {
 						return
 					}
 
-					console.log(`🚀🚀🚀 CONSUMER: Processing message ${message.id}`)
+					// console.log(`🚀🚀🚀 CONSUMER: Processing message ${message.id}`)
 					await this.processMessage(message.id, message.message)
 				}
 			}
 		} catch (error) {
 			// Only log error if we're still running (not a shutdown error)
 			if (this.isRunning) {
-				console.log(`🚀🚀🚀 CONSUMER: ERROR reading from stream:`, error)
+				// console.log(`🚀🚀🚀 CONSUMER: ERROR reading from stream:`, error)
 				logger.error("🔄 LIFECYCLE: ❌ Error reading from stream:", error)
 			}
 			throw error

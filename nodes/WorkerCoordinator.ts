@@ -109,19 +109,19 @@ export class WorkerCoordinator {
 	 * Wait for worker with instant notification
 	 */
 	async waitForWorkerAvailability(functionName: string, workflowId: string, timeout: number = 10000): Promise<WorkerInfo> {
-		console.log(`🎯🎯🎯 COORDINATOR: waitForWorkerAvailability CALLED`)
-		console.log(`🎯🎯🎯 COORDINATOR: Function name: ${functionName}`)
-		console.log(`🎯🎯🎯 COORDINATOR: Workflow ID: ${workflowId}`)
-		console.log(`🎯🎯🎯 COORDINATOR: Timeout: ${timeout}ms`)
+		// console.log(`🎯🎯🎯 COORDINATOR: waitForWorkerAvailability CALLED`)
+		// console.log(`🎯🎯🎯 COORDINATOR: Function name: ${functionName}`)
+		// console.log(`🎯🎯🎯 COORDINATOR: Workflow ID: ${workflowId}`)
+		// console.log(`🎯🎯🎯 COORDINATOR: Timeout: ${timeout}ms`)
 		logger.log(`🎯 COORDINATOR: Checking worker availability for ${functionName}`)
 
-		console.log(`🎯🎯🎯 COORDINATOR: Checking immediate availability...`)
+		// console.log(`🎯🎯🎯 COORDINATOR: Checking immediate availability...`)
 		// Check immediate availability first
 		const workers = await this.registry.getAvailableWorkers(functionName)
-		console.log(`🎯🎯🎯 COORDINATOR: Found ${workers.length} workers:`, workers)
+		// console.log(`🎯🎯🎯 COORDINATOR: Found ${workers.length} workers:`, workers)
 
 		if (workers.length > 0) {
-			console.log(`🎯🎯🎯 COORDINATOR: Checking worker health...`)
+			// console.log(`🎯🎯🎯 COORDINATOR: Checking worker health...`)
 
 			// Sort workers by timestamp (newest first) to check latest workers first
 			const sortedWorkers = workers.sort((a, b) => {
@@ -131,15 +131,15 @@ export class WorkerCoordinator {
 				return timestampB - timestampA // Newest first
 			})
 
-			console.log(`🎯🎯🎯 COORDINATOR: Sorted workers (newest first):`, sortedWorkers)
+			// console.log(`🎯🎯🎯 COORDINATOR: Sorted workers (newest first):`, sortedWorkers)
 
 			// Check if any worker is healthy (starting with newest)
 			for (const workerId of sortedWorkers) {
-				console.log(`🎯🎯🎯 COORDINATOR: Checking health of worker: ${workerId}`)
+				// console.log(`🎯🎯🎯 COORDINATOR: Checking health of worker: ${workerId}`)
 				const isHealthy = await this.registry.isWorkerHealthy(workerId, functionName)
-				console.log(`🎯🎯🎯 COORDINATOR: Worker ${workerId} healthy: ${isHealthy}`)
+				// console.log(`🎯🎯🎯 COORDINATOR: Worker ${workerId} healthy: ${isHealthy}`)
 				if (isHealthy) {
-					console.log(`🎯🎯🎯 COORDINATOR: Found healthy worker immediately: ${workerId}`)
+					// console.log(`🎯🎯🎯 COORDINATOR: Found healthy worker immediately: ${workerId}`)
 					logger.log(`🎯 COORDINATOR: Found healthy worker immediately: ${workerId}`)
 					return {
 						workerId,
@@ -149,25 +149,25 @@ export class WorkerCoordinator {
 					}
 				}
 			}
-			console.log(`🎯🎯🎯 COORDINATOR: No healthy workers found among available workers`)
+			// console.log(`🎯🎯🎯 COORDINATOR: No healthy workers found among available workers`)
 		} else {
-			console.log(`🎯🎯🎯 COORDINATOR: No workers available at all`)
+			// console.log(`🎯🎯🎯 COORDINATOR: No workers available at all`)
 		}
 
 		// No healthy workers available - wait for instant notification
-		console.log(`🎯🎯🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
-		console.log(`🎯🎯🎯 COORDINATOR: This usually means the Function node is restarting after workflow save`)
-		console.log(`🎯🎯🎯 COORDINATOR: Will wait up to ${timeout}ms for Function node to come online`)
-		console.log(`🎯🎯🎯 COORDINATOR: About to call readinessWatcher.waitForFunction...`)
+		// console.log(`🎯🎯🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
+		// console.log(`🎯🎯🎯 COORDINATOR: This usually means the Function node is restarting after workflow save`)
+		// console.log(`🎯🎯🎯 COORDINATOR: Will wait up to ${timeout}ms for Function node to come online`)
+		// console.log(`🎯🎯🎯 COORDINATOR: About to call readinessWatcher.waitForFunction...`)
 		logger.log(`🎯 COORDINATOR: No healthy workers available, waiting for instant notification`)
 
 		try {
 			const result = await this.readinessWatcher.waitForFunction(functionName, workflowId, timeout)
-			console.log(`🎯🎯🎯 COORDINATOR: readinessWatcher.waitForFunction completed:`, result)
+			// console.log(`🎯🎯🎯 COORDINATOR: readinessWatcher.waitForFunction completed:`, result)
 			return result
 		} catch (error) {
-			console.log(`🎯🎯🎯 COORDINATOR: ERROR in readinessWatcher.waitForFunction:`, error)
-			console.log(`🎯🎯🎯 COORDINATOR: This likely means Function node didn't come online within ${timeout}ms`)
+			// console.log(`🎯🎯🎯 COORDINATOR: ERROR in readinessWatcher.waitForFunction:`, error)
+			// console.log(`🎯🎯🎯 COORDINATOR: This likely means Function node didn't come online within ${timeout}ms`)
 			throw error
 		}
 	}

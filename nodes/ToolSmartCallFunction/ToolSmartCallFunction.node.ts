@@ -8,7 +8,7 @@ import {
 	type ISupplyDataFunctions,
 	type SupplyData,
 	type ILoadOptionsFunctions,
-	type INodeExecutionData,
+	// type INodeExecutionData,
 	type IDataObject,
 	NodeOperationError,
 } from "n8n-workflow"
@@ -101,17 +101,17 @@ function toolLogWrapper<T extends Tool>(originalInstance: T, executeFunctions: I
 	})
 }
 
-export class SmartCallFunctionTool implements INodeType {
+export class ToolSmartCallFunction implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: "Smart Call Function Tool",
-		name: "smartCallFunctionTool",
+		name: "toolSmartCallFunction",
 		icon: "fa:play",
-		group: ["transform"],
+		group: ["ai"],
 		version: 1,
 		description: "AI Tool that allows agents to call n8n Function nodes",
 		subtitle: '={{$parameter["functionName"] ? $parameter["functionName"] : "Call Function"}}',
 		defaults: {
-			name: "Call Function Tool",
+			name: "Smart Call Function Tool",
 			color: "#ff6d5a",
 		},
 		codex: {
@@ -121,9 +121,7 @@ export class SmartCallFunctionTool implements INodeType {
 				Tools: ["Other Tools"],
 			},
 		},
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [],
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
 		outputs: [NodeConnectionType.AiTool],
 		outputNames: ["Tool"],
 		properties: [
@@ -312,11 +310,11 @@ export class SmartCallFunctionTool implements INodeType {
 	methods = {
 		loadOptions: {
 			async getAvailableFunctions(this: ILoadOptionsFunctions) {
-				logger.log("🔧 SmartCallFunctionTool: Loading available functions for dropdown")
+				logger.log("🔧 ToolSmartCallFunction: Loading available functions for dropdown")
 
 				// Get the selected workflow ID from the workflowSelector
 				const workflowSelector = this.getCurrentNodeParameter("workflowId") as any
-				logger.log("🔧 SmartCallFunctionTool: Selected workflow selector:", workflowSelector)
+				logger.log("🔧 ToolSmartCallFunction: Selected workflow selector:", workflowSelector)
 
 				// Extract the actual workflow ID from the selector object
 				let workflowId: string = ""
@@ -326,7 +324,7 @@ export class SmartCallFunctionTool implements INodeType {
 					workflowId = workflowSelector
 				}
 
-				logger.log("🔧 SmartCallFunctionTool: Extracted workflow ID:", workflowId)
+				logger.log("🔧 ToolSmartCallFunction: Extracted workflow ID:", workflowId)
 
 				if (!workflowId) {
 					return [
@@ -357,14 +355,14 @@ export class SmartCallFunctionTool implements INodeType {
 					]
 				}
 
-				logger.log("🔧 SmartCallFunctionTool: Available functions:", availableFunctions)
+				logger.log("🔧 ToolSmartCallFunction: Available functions:", availableFunctions)
 				return availableFunctions
 			},
 			async getFunctionParameters(this: ILoadOptionsFunctions) {
 				const functionName = this.getCurrentNodeParameter("functionName") as string
 				const workflowSelector = this.getCurrentNodeParameter("workflowId") as any
 
-				logger.log("🔧 SmartCallFunctionTool: Loading parameters for function:", functionName)
+				logger.log("🔧 ToolSmartCallFunction: Loading parameters for function:", functionName)
 
 				// Extract the actual workflow ID from the selector object
 				let workflowId: string = ""
@@ -385,7 +383,7 @@ export class SmartCallFunctionTool implements INodeType {
 				const registry = await getFunctionRegistry()
 				const parameters = await registry.getFunctionParameters(functionName, workflowId)
 
-				logger.log("🔧 SmartCallFunctionTool: Found parameters:", parameters)
+				logger.log("🔧 ToolSmartCallFunction: Found parameters:", parameters)
 
 				// Get currently configured parameters to filter out already selected ones
 				const currentParameters = this.getCurrentNodeParameter("functionParameters") as any
@@ -439,9 +437,9 @@ export class SmartCallFunctionTool implements INodeType {
 			workflowId = workflowSelector
 		}
 
-		logger.log("🔧 SmartCallFunctionTool: Creating tool for function:", functionName)
-		logger.log("🔧 SmartCallFunctionTool: Workflow ID:", workflowId)
-		logger.log("🔧 SmartCallFunctionTool: Parameter mode:", parameterMode)
+		logger.log("🔧 ToolSmartCallFunction: Creating tool for function:", functionName)
+		logger.log("🔧 ToolSmartCallFunction: Workflow ID:", workflowId)
+		logger.log("🔧 ToolSmartCallFunction: Parameter mode:", parameterMode)
 
 		if (!workflowId) {
 			throw new NodeOperationError(this.getNode(), "Please select a workflow first.")
@@ -467,7 +465,7 @@ export class SmartCallFunctionTool implements INodeType {
 			if (selectedFunction) {
 				actualFunctionName = selectedFunction.name
 				actualFunctionDescription = selectedFunction.description
-				logger.log("🔧 SmartCallFunctionTool: Found function in registry:", {
+				logger.log("🔧 ToolSmartCallFunction: Found function in registry:", {
 					name: actualFunctionName,
 					description: actualFunctionDescription,
 				})
@@ -482,7 +480,7 @@ export class SmartCallFunctionTool implements INodeType {
 		const finalFunctionName = setCustomFunctionName && customFunctionName ? customFunctionName : actualFunctionName
 		const finalFunctionDescription = setCustomFunctionDescription && customFunctionDescription ? customFunctionDescription : actualFunctionDescription
 
-		logger.log("🔧 SmartCallFunctionTool: Final function details:", {
+		logger.log("🔧 ToolSmartCallFunction: Final function details:", {
 			name: finalFunctionName,
 			description: finalFunctionDescription,
 			usingCustomName: setCustomFunctionName && customFunctionName,
@@ -499,7 +497,7 @@ export class SmartCallFunctionTool implements INodeType {
 				type: param.type || "string",
 				required: param.required || false,
 			}))
-			logger.log("🔧 SmartCallFunctionTool: All function parameters:", allFunctionParams)
+			logger.log("🔧 ToolSmartCallFunction: All function parameters:", allFunctionParams)
 		} catch (error) {
 			logger.warn("🔧 CallFunctionTool: Failed to get function parameters:", error)
 			allFunctionParams = []
@@ -511,7 +509,7 @@ export class SmartCallFunctionTool implements INodeType {
 
 		if (parameterMode === "auto") {
 			// Auto mode: All function parameters are AI-provided with original required/optional settings
-			logger.log("🔧 SmartCallFunctionTool: Using auto mode - all parameters AI-provided")
+			logger.log("🔧 ToolSmartCallFunction: Using auto mode - all parameters AI-provided")
 			for (const param of allFunctionParams) {
 				aiParameters.push({
 					name: param.name,
@@ -523,7 +521,7 @@ export class SmartCallFunctionTool implements INodeType {
 			}
 		} else {
 			// Manual mode: Use valueProvider configuration
-			logger.log("🔧 SmartCallFunctionTool: Using manual mode - valueProvider configuration")
+			logger.log("🔧 ToolSmartCallFunction: Using manual mode - valueProvider configuration")
 
 			// Get configured parameter settings
 			const functionParameters = this.getNodeParameter("functionParameters", 0, {}) as any
@@ -591,7 +589,7 @@ export class SmartCallFunctionTool implements INodeType {
 			}
 		}
 
-		logger.log("🔧 SmartCallFunctionTool: Parameter configuration summary:", {
+		logger.log("🔧 ToolSmartCallFunction: Parameter configuration summary:", {
 			totalParameters: allFunctionParams.length,
 			hardCodedParameters: Array.from(hardCodedValues.keys()),
 			aiParameters: aiParameters.map((p) => `${p.name}(${p.required ? "required" : "optional"})`),
@@ -612,7 +610,7 @@ export class SmartCallFunctionTool implements INodeType {
 		}
 
 		// Log the complete tool schema that the AI agent will see
-		logger.log("🔧 SmartCallFunctionTool: Complete tool schema for AI agent:", {
+		logger.log("🔧 ToolSmartCallFunction: Complete tool schema for AI agent:", {
 			toolName: finalFunctionName.replace(/ /g, "_"),
 			originalFunctionName: functionName,
 			actualFunctionName: actualFunctionName,
@@ -631,7 +629,7 @@ export class SmartCallFunctionTool implements INodeType {
 			},
 		})
 
-		logger.log("🔧 SmartCallFunctionTool: Final tool description:", finalDescription)
+		logger.log("🔧 ToolSmartCallFunction: Final tool description:", finalDescription)
 
 		// Get the base context for proper execution tracking
 		const baseContext = this
@@ -642,7 +640,7 @@ export class SmartCallFunctionTool implements INodeType {
 		// Create the tool function with proper execution tracking
 		const toolFunction = async (input: string | Record<string, any>, runManager?: CallbackManagerForToolRun) => {
 			const localRunIndex = runIndex++
-			logger.log("🔧 SmartCallFunctionTool: Tool function called with input:", input, "runIndex:", localRunIndex)
+			logger.log("🔧 ToolSmartCallFunction: Tool function called with input:", input, "runIndex:", localRunIndex)
 
 			let aiProvidedParameters: Record<string, any> = {}
 
@@ -664,7 +662,7 @@ export class SmartCallFunctionTool implements INodeType {
 				throw new NodeOperationError(baseContext.getNode(), "Invalid input type. Expected string or object.")
 			}
 
-			logger.log("🔧 SmartCallFunctionTool: AI-provided parameters:", aiProvidedParameters)
+			logger.log("🔧 ToolSmartCallFunction: AI-provided parameters:", aiProvidedParameters)
 
 			// Validate required AI parameters
 			for (const paramDef of aiParameters) {
@@ -679,7 +677,7 @@ export class SmartCallFunctionTool implements INodeType {
 				...aiProvidedParameters,
 			}
 
-			logger.log("🔧 SmartCallFunctionTool: Final merged parameters:", finalParameters)
+			logger.log("🔧 ToolSmartCallFunction: Final merged parameters:", finalParameters)
 
 			try {
 				// Call the function using FunctionCallService
@@ -694,25 +692,25 @@ export class SmartCallFunctionTool implements INodeType {
 					throw new NodeOperationError(baseContext.getNode(), result.error || "Function call failed")
 				}
 
-				logger.log("🔧 SmartCallFunctionTool: Function call successful, result:", result.data)
+				logger.log("🔧 ToolSmartCallFunction: Function call successful, result:", result.data)
 
 				// Prepare response data for logging
-				const responseData: INodeExecutionData[] = [
-					{
-						json: {
-							functionName,
-							workflowId,
-							aiProvidedParameters,
-							hardCodedParameters: Object.fromEntries(hardCodedValues),
-							finalParameters,
-							result: result.data,
-							success: true,
-						},
-					},
-				]
+				// const responseData: INodeExecutionData[] = [
+				// 	{
+				// 		json: {
+				// 			functionName,
+				// 			workflowId,
+				// 			aiProvidedParameters,
+				// 			hardCodedParameters: Object.fromEntries(hardCodedValues),
+				// 			finalParameters,
+				// 			result: result.data,
+				// 			success: true,
+				// 		},
+				// 	},
+				// ]
 
 				// Add output data to register the tool execution in n8n's system (this makes it show up in AI Agent logs!)
-				void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [responseData])
+				// void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [responseData])
 
 				// Return the result data, or a success message if no data
 				return result.data !== null ? JSON.stringify(result.data) : "Function executed successfully"
@@ -720,22 +718,22 @@ export class SmartCallFunctionTool implements INodeType {
 				logger.error("🔧 CallFunctionTool: Function call failed:", error)
 
 				// Prepare error data for logging
-				const errorData: INodeExecutionData[] = [
-					{
-						json: {
-							functionName,
-							workflowId,
-							aiProvidedParameters,
-							hardCodedParameters: Object.fromEntries(hardCodedValues),
-							finalParameters,
-							error: error.message,
-							success: false,
-						},
-					},
-				]
+				// const errorData: INodeExecutionData[] = [
+				// 	{
+				// 		json: {
+				// 			functionName,
+				// 			workflowId,
+				// 			aiProvidedParameters,
+				// 			hardCodedParameters: Object.fromEntries(hardCodedValues),
+				// 			finalParameters,
+				// 			error: error.message,
+				// 			success: false,
+				// 		},
+				// 	},
+				// ]
 
 				// Add error output data to register the failed execution
-				void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [errorData])
+				// void baseContext.addOutputData(NodeConnectionType.AiTool, localRunIndex, [errorData])
 
 				throw new NodeOperationError(baseContext.getNode(), `Function call failed: ${error.message}`)
 			}
@@ -748,7 +746,7 @@ export class SmartCallFunctionTool implements INodeType {
 			func: toolFunction,
 		})
 
-		logger.log("🔧 SmartCallFunctionTool: Tool created successfully with name:", finalFunctionName)
+		logger.log("🔧 ToolSmartCallFunction: Tool created successfully with name:", finalFunctionName)
 
 		// Apply the log wrapper to make the tool visible in AI Agent logs
 		const wrappedTool = toolLogWrapper(tool, this)

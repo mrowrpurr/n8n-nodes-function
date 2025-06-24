@@ -23,7 +23,7 @@ export class Logger {
 	 */
 	info(...args: any[]): void {
 		if (LOG_INFO_ENABLED) {
-			console.log(`${this.prefix}:`, ...args)
+			// console.log(`${this.prefix}:`, ...args)
 		}
 	}
 
@@ -33,7 +33,7 @@ export class Logger {
 	 */
 	debug(...args: any[]): void {
 		if (LOG_DEBUG_ENABLED) {
-			console.log(`${this.prefix}:`, ...args)
+			// console.log(`${this.prefix}:`, ...args)
 		}
 	}
 
